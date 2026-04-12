@@ -33,7 +33,6 @@ const DEFAULT_ADSR = { attack: 0.012, decay: 0.18, sustain: 0.78, release: 0.22 
 const DEFAULT_FILTER = { type: "allpass", cutoff: 18000, resonance: 0.7 };
 const DEFAULT_FX_PARAMS = {
   distortion: { enabled: false, drive: 8, tone: 0.45, mix: 0.8, asym: 0.15 },
-  squelch:    { enabled: false, mix: 0.45, cutoff: 850, resonance: 14, rate: 2.4, depth: 0.6 },
   chorus:     { enabled: false, mix: 0.5, rate: 1.5, depth: 0.005 },
   delay:      { enabled: false, mix: 0.3, time: 0.35, feedback: 0.4 },
   reverb:     { enabled: false, mix: 0.3, decay: 2.0 },
@@ -41,7 +40,6 @@ const DEFAULT_FX_PARAMS = {
 
 const withFxDefaults = (fx = {}) => ({
   distortion: { ...DEFAULT_FX_PARAMS.distortion, ...(fx.distortion || {}) },
-  squelch: { ...DEFAULT_FX_PARAMS.squelch, ...(fx.squelch || {}) },
   chorus: { ...DEFAULT_FX_PARAMS.chorus, ...(fx.chorus || {}) },
   delay: { ...DEFAULT_FX_PARAMS.delay, ...(fx.delay || {}) },
   reverb: { ...DEFAULT_FX_PARAMS.reverb, ...(fx.reverb || {}) },
@@ -2652,6 +2650,7 @@ export default function GraphingCalculatorSynthApp() {
   const [d, setD] = useState(0);
   const [openEffect, setOpenEffect] = useState(null);
   const [fxParams, setFxParams] = useState(() => withFxDefaults());
+  const [fxOrder, setFxOrder] = useState(["distortion", "chorus", "delay", "reverb"]);
   const [audioReady, setAudioReady] = useState(false);
   const [midiStatus, setMidiStatus] = useState("No MIDI connected");
   const [activeNotes, setActiveNotes] = useState([]);
@@ -2985,7 +2984,7 @@ export default function GraphingCalculatorSynthApp() {
     analyser.connect(ctx.destination);
     analyserRef.current = analyser;
 
-    // ── Effects chain (reverse order: reverb → delay → chorus → squelch → distortion) ──
+    // ── Effects chain (reverse order: reverb → delay → chorus → distortion) ──
     const reverbDry = ctx.createGain();  reverbDry.gain.value = 1;
     const reverbWet = ctx.createGain();  reverbWet.gain.value = 0;
     const convolver = ctx.createConvolver();
@@ -2993,7 +2992,6 @@ export default function GraphingCalculatorSynthApp() {
     const reverbIn = ctx.createGain();
     reverbIn.connect(reverbDry);  reverbIn.connect(convolver);
     convolver.connect(reverbWet);
-    reverbDry.connect(gain);  reverbWet.connect(gain);
 
     const delayDry = ctx.createGain();   delayDry.gain.value = 1;
     const delayWet = ctx.createGain();   delayWet.gain.value = 0;
@@ -3004,7 +3002,6 @@ export default function GraphingCalculatorSynthApp() {
     delayIn.connect(delayDry);  delayIn.connect(delayNode);
     delayNode.connect(delayFb);  delayFb.connect(delayNode);
     delayNode.connect(delayWet);
-    delayDry.connect(reverbIn);  delayWet.connect(reverbIn);
 
     const chorusDry = ctx.createGain();  chorusDry.gain.value = 1;
     const chorusWet = ctx.createGain();  chorusWet.gain.value = 0;
@@ -3020,7 +3017,6 @@ export default function GraphingCalculatorSynthApp() {
     const chorusIn = ctx.createGain();
     chorusIn.connect(chorusDry);  chorusIn.connect(chorusDl);
     chorusDl.connect(chorusWet);
-    chorusDry.connect(delayIn);  chorusWet.connect(delayIn);
 
     const distNode = ctx.createWaveShaper();
     distNode.oversample = "4x";
@@ -3032,49 +3028,26 @@ export default function GraphingCalculatorSynthApp() {
     distFilter.type = "lowpass";
     distFilter.frequency.value = 20000;
 
-    const squelchDry = ctx.createGain();
-    const squelchWet = ctx.createGain();
-    squelchDry.gain.value = 1;
-    squelchWet.gain.value = 0;
-    const squelchFilter = ctx.createBiquadFilter();
-    squelchFilter.type = "lowpass";
-    squelchFilter.frequency.value = 850;
-    squelchFilter.Q.value = 14;
-    const squelchLfo = ctx.createOscillator();
-    squelchLfo.type = "triangle";
-    squelchLfo.frequency.value = 2.4;
-    const squelchDepth = ctx.createGain();
-    squelchDepth.gain.value = 0;
-    squelchLfo.connect(squelchDepth);
-    squelchDepth.connect(squelchFilter.frequency);
-    squelchLfo.start();
-
     const voiceFilter = ctx.createBiquadFilter();
     voiceFilter.type = "allpass";
     voiceFilter.frequency.value = 18000;
     voiceFilter.Q.value = 0.7;
     const distIn = ctx.createGain();
-    const squelchIn = ctx.createGain();
     distIn.connect(distDry);
     distIn.connect(distNode);
     distNode.connect(distFilter);
     distFilter.connect(distWet);
-    distDry.connect(squelchIn);
-    distWet.connect(squelchIn);
-    squelchIn.connect(squelchDry);
-    squelchIn.connect(squelchFilter);
-    squelchFilter.connect(squelchWet);
-    squelchDry.connect(chorusIn);
-    squelchWet.connect(chorusIn);
 
     fxNodesRef.current = {
-      distortion: { node: distNode, filter: distFilter, dry: distDry, wet: distWet },
-      squelch:    { dry: squelchDry, wet: squelchWet, filter: squelchFilter, lfo: squelchLfo, depth: squelchDepth },
-      chorus:     { dry: chorusDry, wet: chorusWet, lfo: chorusLfo, depth: chorusDepth, dl: chorusDl },
-      delay:      { dry: delayDry, wet: delayWet, node: delayNode, fb: delayFb },
-      reverb:     { dry: reverbDry, wet: reverbWet, conv: convolver },
+      distortion: { in: distIn, node: distNode, filter: distFilter, dry: distDry, wet: distWet },
+      chorus:     { in: chorusIn, dry: chorusDry, wet: chorusWet, lfo: chorusLfo, depth: chorusDepth, dl: chorusDl },
+      delay:      { in: delayIn, dry: delayDry, wet: delayWet, node: delayNode, fb: delayFb },
+      reverb:     { in: reverbIn, dry: reverbDry, wet: reverbWet, conv: convolver },
     };
     filterNodeRef.current = voiceFilter;
+
+    // Wire effects chain based on current order
+    rewireFxChain(fxOrder, gain, voiceFilter);
 
     const processor = ctx.createScriptProcessor(2048, 0, 1);
     // Smooth param interpolation to prevent LFO-induced clicks
@@ -3124,7 +3097,6 @@ export default function GraphingCalculatorSynthApp() {
       }
     };
     processor.connect(voiceFilter);
-    voiceFilter.connect(distIn);
 
     audioCtxRef.current = ctx;
     processorRef.current = processor;
@@ -3213,18 +3185,6 @@ export default function GraphingCalculatorSynthApp() {
       fx.distortion.wet.gain.value = 0;
       fx.distortion.dry.gain.value = 1;
     }
-    const sp = fxParams.squelch;
-    fx.squelch.wet.gain.value = sp.enabled ? sp.mix : 0;
-    fx.squelch.dry.gain.value = sp.enabled ? 1 - sp.mix : 1;
-    if (ctx) {
-      fx.squelch.filter.frequency.setTargetAtTime(clamp(sp.cutoff, 120, 8000), ctx.currentTime, 0.015);
-      fx.squelch.filter.Q.setTargetAtTime(clamp(sp.resonance, 0.1, 24), ctx.currentTime, 0.015);
-    } else {
-      fx.squelch.filter.frequency.value = clamp(sp.cutoff, 120, 8000);
-      fx.squelch.filter.Q.value = clamp(sp.resonance, 0.1, 24);
-    }
-    fx.squelch.lfo.frequency.value = sp.rate;
-    fx.squelch.depth.gain.value = sp.enabled ? sp.depth * 2800 : 0;
     const cp = fxParams.chorus;
     fx.chorus.wet.gain.value = cp.enabled ? cp.mix : 0;
     fx.chorus.lfo.frequency.value = cp.rate;
@@ -3244,6 +3204,31 @@ export default function GraphingCalculatorSynthApp() {
     reverbDecayRef.current = fxParams.reverb.decay;
     fx.reverb.conv.buffer = generateIR(ctx, fxParams.reverb.decay);
   }, [fxParams.reverb.decay]);
+
+  // ── Rewire effects chain when order changes ───────────────────────
+  const rewireFxChain = useCallback((order, masterOverride, vfOverride) => {
+    const fx = fxNodesRef.current;
+    const vf = vfOverride || filterNodeRef.current;
+    const master = masterOverride || gainRef.current;
+    if (!fx || !vf || !master) return;
+    const ids = ["distortion", "chorus", "delay", "reverb"];
+    // Disconnect inter-effect wiring (dry/wet outputs + voiceFilter output)
+    vf.disconnect();
+    for (const id of ids) { fx[id].dry.disconnect(); fx[id].wet.disconnect(); }
+    // Reconnect based on order
+    vf.connect(fx[order[0]].in);
+    for (let i = 0; i < order.length - 1; i++) {
+      fx[order[i]].dry.connect(fx[order[i + 1]].in);
+      fx[order[i]].wet.connect(fx[order[i + 1]].in);
+    }
+    const last = order[order.length - 1];
+    fx[last].dry.connect(master);
+    fx[last].wet.connect(master);
+  }, []);
+
+  useEffect(() => {
+    rewireFxChain(fxOrder);
+  }, [fxOrder, rewireFxChain]);
 
   // ── LFO modulation loop ───────────────────────────────────────────
   useEffect(() => {
@@ -3765,7 +3750,7 @@ export default function GraphingCalculatorSynthApp() {
             fontSize: 16, color: "#0d0b08", fontWeight: 900,
             boxShadow: "0 0 10px rgba(232,133,12,0.4)",
           }}>∿</span>
-          <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase", color: T.amber }}>WaveCraft</span>
+          <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase", color: T.amber }}>EquationSynth</span>
           <span style={{ fontSize: 10, color: T.textMuted, fontWeight: 500, marginLeft: 4, letterSpacing: 2 }}>v0.1</span>
           <div style={{ display: "flex", marginLeft: 16, gap: 2 }}>
             {[{ id: "synth", label: "SYNTH" }, { id: "draw", label: "DRAW" }, { id: "drums", label: "DRUMS" }].map((tab) => (
@@ -4083,14 +4068,6 @@ export default function GraphingCalculatorSynthApp() {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Section title="Audio Engine" icon="🔊">
-              <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-                <button onClick={setupAudio} style={audioReady ? btnGhost : btnPrimary}>
-                  {audioReady ? "✓ Audio Ready" : "▶ Enable Audio"}
-                </button>
-                <button onClick={panic} style={btnGhost}>
-                  ■ Panic
-                </button>
-              </div>
               <Knob label="Master Volume" value={masterVolume} onChange={setMasterVolume} min={0} max={0.5} step={0.001} defaultValue={0.18} lfoMod={lfoDisplay.volume} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
                 <Pill>{sampleRate.toLocaleString()} Hz</Pill>
@@ -4366,55 +4343,72 @@ export default function GraphingCalculatorSynthApp() {
 
             {/* Effects Chain */}
             <Section title="Effects Chain" icon="✨">
-              {[
-                { id: "distortion", label: "Distortion", icon: "🔥", knobs: [
-                  { key: "drive", label: "Drive", min: 1, max: 30, step: 0.1 },
-                  { key: "tone",  label: "Tone",  min: 0, max: 1,  step: 0.01 },
-                  { key: "mix",   label: "Mix",   min: 0, max: 1,  step: 0.01 },
-                  { key: "asym",  label: "Asym",  min: 0, max: 0.6, step: 0.01 },
-                ]},
-                { id: "squelch", label: "Squelch", icon: "🫧", knobs: [
-                  { key: "mix",       label: "Mix",       min: 0, max: 1, step: 0.01 },
-                  { key: "cutoff",    label: "Cutoff",    min: 120, max: 8000, step: 1 },
-                  { key: "resonance", label: "Reso",      min: 0.1, max: 24, step: 0.1 },
-                  { key: "rate",      label: "Rate",      min: 0.1, max: 12, step: 0.1 },
-                  { key: "depth",     label: "Depth",     min: 0, max: 1, step: 0.01 },
-                ]},
-                { id: "chorus", label: "Chorus", icon: "🌊", knobs: [
-                  { key: "mix",   label: "Mix",   min: 0, max: 1,    step: 0.01 },
-                  { key: "rate",  label: "Rate",  min: 0.1, max: 8,  step: 0.1 },
-                  { key: "depth", label: "Depth", min: 0, max: 0.02, step: 0.001 },
-                ]},
-                { id: "delay", label: "Delay", icon: "🔁", knobs: [
-                  { key: "mix",      label: "Mix",      min: 0, max: 1,   step: 0.01 },
-                  { key: "time",     label: "Time",     min: 0.05, max: 1, step: 0.01 },
-                  { key: "feedback", label: "Feedback", min: 0, max: 0.9, step: 0.01 },
-                ]},
-                { id: "reverb", label: "Reverb", icon: "🏛", knobs: [
-                  { key: "mix",   label: "Mix",   min: 0, max: 1,   step: 0.01 },
-                  { key: "decay", label: "Decay", min: 0.2, max: 5, step: 0.1 },
-                ]},
-              ].map((fx) => {
-                const fp = fxParams[fx.id];
-                const isOpen = openEffect === fx.id;
-                return (
-                  <div key={fx.id} style={{
-                    marginBottom: 4, borderRadius: T.radius,
-                    border: `1px solid ${fp.enabled ? "rgba(255,180,60,0.25)" : T.border}`,
-                    background: fp.enabled ? T.accentSoft : T.surface,
-                    overflow: "hidden", transition: "all 100ms",
-                  }}>
+              {(() => {
+                const FX_DEFS = {
+                  distortion: { label: "Distortion", icon: "🔥", knobs: [
+                    { key: "drive", label: "Drive", min: 1, max: 30, step: 0.1 },
+                    { key: "tone",  label: "Tone",  min: 0, max: 1,  step: 0.01 },
+                    { key: "mix",   label: "Mix",   min: 0, max: 1,  step: 0.01 },
+                    { key: "asym",  label: "Asym",  min: 0, max: 0.6, step: 0.01 },
+                  ]},
+                  chorus: { label: "Chorus", icon: "🌊", knobs: [
+                    { key: "mix",   label: "Mix",   min: 0, max: 1,    step: 0.01 },
+                    { key: "rate",  label: "Rate",  min: 0.1, max: 8,  step: 0.1 },
+                    { key: "depth", label: "Depth", min: 0, max: 0.02, step: 0.001 },
+                  ]},
+                  delay: { label: "Delay", icon: "🔁", knobs: [
+                    { key: "mix",      label: "Mix",      min: 0, max: 1,   step: 0.01 },
+                    { key: "time",     label: "Time",     min: 0.05, max: 1, step: 0.01 },
+                    { key: "feedback", label: "Feedback", min: 0, max: 0.9, step: 0.01 },
+                  ]},
+                  reverb: { label: "Reverb", icon: "🏛", knobs: [
+                    { key: "mix",   label: "Mix",   min: 0, max: 1,   step: 0.01 },
+                    { key: "decay", label: "Decay", min: 0.2, max: 5, step: 0.1 },
+                  ]},
+                };
+                return fxOrder.map((id, idx) => {
+                  const def = FX_DEFS[id];
+                  const fp = fxParams[id];
+                  const isOpen = openEffect === id;
+                  return (
                     <div
-                      onClick={() => setOpenEffect(isOpen ? null : fx.id)}
+                      key={id}
+                      draggable
+                      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", idx.toString()); e.currentTarget.style.opacity = "0.5"; }}
+                      onDragEnd={(e) => { e.currentTarget.style.opacity = "1"; }}
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; e.currentTarget.style.borderTop = `2px solid ${T.accent}`; }}
+                      onDragLeave={(e) => { e.currentTarget.style.borderTop = ""; }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.style.borderTop = "";
+                        const from = parseInt(e.dataTransfer.getData("text/plain"), 10);
+                        if (isNaN(from) || from === idx) return;
+                        setFxOrder((prev) => {
+                          const next = [...prev];
+                          const [moved] = next.splice(from, 1);
+                          next.splice(idx, 0, moved);
+                          return next;
+                        });
+                      }}
                       style={{
-                        display: "flex", alignItems: "center", gap: 10,
-                        padding: "8px 12px", cursor: "pointer", userSelect: "none",
+                        marginBottom: 4, borderRadius: T.radius,
+                        border: `1px solid ${fp.enabled ? "rgba(255,180,60,0.25)" : T.border}`,
+                        background: fp.enabled ? T.accentSoft : T.surface,
+                        overflow: "hidden", transition: "background 100ms, border-color 100ms",
                       }}
                     >
-                      <span style={{ fontSize: 12 }}>{fx.icon}</span>
-                      <span style={{ flex: 1, fontSize: 10, fontWeight: 700, color: T.text, fontFamily: T.font, textTransform: "uppercase", letterSpacing: 1 }}>{fx.label}</span>
                       <div
-                        onClick={(e) => { e.stopPropagation(); updateFx(fx.id, "enabled", !fp.enabled); }}
+                        onClick={() => setOpenEffect(isOpen ? null : id)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 10,
+                          padding: "8px 12px", cursor: "pointer", userSelect: "none",
+                        }}
+                      >
+                        <span style={{ cursor: "grab", fontSize: 11, color: T.textMuted, lineHeight: 1, letterSpacing: 1 }} title="Drag to reorder">⠿</span>
+                        <span style={{ fontSize: 12 }}>{def.icon}</span>
+                        <span style={{ flex: 1, fontSize: 10, fontWeight: 700, color: T.text, fontFamily: T.font, textTransform: "uppercase", letterSpacing: 1 }}>{def.label}</span>
+                      <div
+                        onClick={(e) => { e.stopPropagation(); updateFx(id, "enabled", !fp.enabled); }}
                         style={{
                           width: 32, height: 16, borderRadius: 2, padding: 2,
                           background: fp.enabled ? T.accent : "#181208",
@@ -4442,12 +4436,12 @@ export default function GraphingCalculatorSynthApp() {
                         borderTop: `1px solid ${T.border}`,
                         display: "flex", justifyContent: "center", gap: 20, flexWrap: "wrap",
                       }}>
-                        {fx.knobs.map((k) => (
+                        {def.knobs.map((k) => (
                           <RotaryKnob
                             key={k.key}
                             label={k.label}
                             value={fp[k.key]}
-                            onChange={(v) => updateFx(fx.id, k.key, v)}
+                            onChange={(v) => updateFx(id, k.key, v)}
                             min={k.min}
                             max={k.max}
                             step={k.step}
@@ -4457,7 +4451,8 @@ export default function GraphingCalculatorSynthApp() {
                     )}
                   </div>
                 );
-              })}
+              });
+              })()}
             </Section>
 
           </div>

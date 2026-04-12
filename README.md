@@ -27,6 +27,19 @@ npm run dev
 
 Open the Vite URL in your browser, click `Enable Audio`, and start making noise.
 
+## GitHub Pages
+
+This repo is set up to publish the frontend in `app/` to GitHub Pages with Actions.
+
+1. Push this repo to GitHub.
+2. In GitHub, open `Settings -> Pages`.
+3. Set `Build and deployment` to `GitHub Actions`.
+4. Push to `main` or run the `Deploy GitHub Pages` workflow manually.
+
+The published site will host the synth UI only. GitHub Pages cannot run the Node/SQLite backend in `server/`.
+
+If you want cloud presets/login on the deployed site, host the API separately and add a repository variable named `VITE_API_BASE` with your API URL, for example `https://your-api.example.com`.
+
 ## How To Use It
 
 1. Enter an equation in the `f(x)` box and click `Apply`.
