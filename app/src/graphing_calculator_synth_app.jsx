@@ -41,45 +41,91 @@ function generateIR(ctx, decay) {
   return buf;
 }
 
-// ─── Theme ──────────────────────────────────────────────────────────
+// ─── Theme ── Retro Analog ───────────────────────────────────────────
 const T = {
-  bg:         "#0f1318",
-  surface:    "#181e25",
-  surfaceAlt: "#1e2630",
-  raised:     "#242d38",
-  border:     "rgba(255,255,255,0.07)",
-  borderHi:   "rgba(255,255,255,0.12)",
-  text:       "#e8ecf1",
-  textDim:    "#7b8a9a",
-  textMuted:  "#4a5568",
-  accent:     "#6c63ff",
-  accentGlow: "rgba(108,99,255,0.25)",
-  accentSoft: "rgba(108,99,255,0.12)",
-  green:      "#10b981",
-  greenGlow:  "rgba(16,185,129,0.2)",
-  greenDark:  "#059669",
-  red:        "#ef4444",
-  amber:      "#f59e0b",
-  white:      "#ffffff",
-  plotBg:     "#f8fafc",
-  plotLine:   "#6c63ff",
-  plotAxis:   "#cbd5e1",
-  plotGrid:   "#e2e8f0",
-  radius:     10,
-  radiusLg:   16,
-  font:       "'Inter', system-ui, -apple-system, sans-serif",
+  bg:         "#0d0b08",
+  surface:    "#1a1510",
+  surfaceAlt: "#211c14",
+  raised:     "#2e2820",
+  border:     "rgba(255,180,60,0.12)",
+  borderHi:   "rgba(255,180,60,0.25)",
+  text:       "#e8d5b0",
+  textDim:    "#9a8560",
+  textMuted:  "#6b5a3e",
+  accent:     "#e8850c",
+  accentGlow: "rgba(232,133,12,0.35)",
+  accentSoft: "rgba(232,133,12,0.15)",
+  green:      "#33ff66",
+  greenGlow:  "rgba(51,255,102,0.3)",
+  greenDark:  "#20cc44",
+  red:        "#cc3300",
+  amber:      "#ffaa00",
+  white:      "#f0e6d2",
+  plotBg:     "#080c08",
+  plotLine:   "#33ff66",
+  plotAxis:   "#1a3a1a",
+  plotGrid:   "#0f1f0f",
+  radius:     3,
+  radiusLg:   5,
+  font:       "'Share Tech Mono', 'Courier New', monospace",
+};
+
+// CRT scanline overlay CSS injected once
+if (typeof document !== "undefined" && !document.getElementById("crt-style")) {
+  const style = document.createElement("style");
+  style.id = "crt-style";
+  style.textContent = `
+    .crt-overlay {
+      pointer-events: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.06) 2px,
+        rgba(0,0,0,0.06) 4px
+      );
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    @keyframes led-glow {
+      0%, 100% { box-shadow: 0 0 4px currentColor; }
+      50% { box-shadow: 0 0 8px currentColor, 0 0 16px currentColor; }
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px;
+      border-radius: 2px;
+      background: #e8850c;
+      border: 1px solid #ffaa00;
+      box-shadow: 0 0 6px rgba(232,133,12,0.5);
+      cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+      height: 4px;
+      background: #2e2820;
+      border-radius: 2px;
+      border: 1px solid rgba(255,180,60,0.15);
+    }
+    ::selection { background: rgba(232,133,12,0.3); }
+  `;
+  document.head.appendChild(style);
 };
 
 // ─── Slider ─────────────────────────────────────────────────────────
 function Knob({ label, value, onChange, min = -5, max = 5, step = 0.001, compact = false, defaultValue }) {
   const showReset = defaultValue !== undefined && value !== defaultValue;
   return (
-    <div style={{ marginBottom: compact ? 10 : 14 }}>
+    <div style={{ marginBottom: compact ? 8 : 12 }}>
       <div style={{
         display: "flex", justifyContent: "space-between", alignItems: "center",
-        marginBottom: 6, padding: "0 2px",
+        marginBottom: 5, padding: "0 2px",
       }}>
-        <span style={{ fontSize: compact ? 13 : 14, fontWeight: 600, color: T.text, letterSpacing: 0.5, textTransform: "uppercase" }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: T.textDim, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: T.font }}>
           {label}
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -89,21 +135,22 @@ function Knob({ label, value, onChange, min = -5, max = 5, step = 0.001, compact
               title="Reset"
               style={{
                 background: "none", border: "none", cursor: "pointer",
-                color: T.textMuted, fontSize: 14, padding: 0, lineHeight: 1,
+                color: T.textMuted, fontSize: 13, padding: 0, lineHeight: 1,
               }}
             >↺</button>
           )}
           <span style={{
             fontSize: compact ? 13 : 14, fontVariantNumeric: "tabular-nums",
-            color: T.accent, fontWeight: 500,
+            color: T.green, fontWeight: 700, fontFamily: "'VT323', 'Courier New', monospace",
+            textShadow: "0 0 8px rgba(51,255,102,0.5)",
           }}>
             {value.toFixed(3)}
           </span>
         </span>
       </div>
       <div style={{
-        background: T.surfaceAlt, border: `1px solid ${T.border}`,
-        borderRadius: T.radius, padding: "10px 14px",
+        background: "#181208", border: `1px solid ${T.border}`,
+        borderRadius: T.radius, padding: "8px 12px",
       }}>
         <input
           type="range" min={min} max={max} step={step}
@@ -160,9 +207,9 @@ function RotaryKnob({ label, value, onChange, min = 0, max = 1, step = 0.01, siz
         <circle cx={r} cy={r} r={ir} fill={T.raised} stroke={T.borderHi} strokeWidth={1} />
         <line x1={r} y1={r} x2={px} y2={py} stroke={T.accent} strokeWidth={2} strokeLinecap="round" />
       </svg>
-      <span style={{ fontSize: 9, color: T.textDim, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
+      <span style={{ fontSize: 8, color: T.textDim, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, fontFamily: T.font }}>{label}</span>
       <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
-        <span style={{ fontSize: 9, color: T.accent, fontVariantNumeric: "tabular-nums" }}>{value.toFixed(step < 0.01 ? 3 : 2)}</span>
+        <span style={{ fontSize: 11, color: T.green, fontVariantNumeric: "tabular-nums", fontFamily: "'VT323', 'Courier New', monospace", textShadow: "0 0 6px rgba(51,255,102,0.4)" }}>{value.toFixed(step < 0.01 ? 3 : 2)}</span>
         {showReset && (
           <button
             onClick={() => onChange(defaultValue)}
@@ -211,11 +258,11 @@ function PlotCanvas({ equation, params, xScale, yScale, drawnWave }) {
     try {
       setError("");
       ctx.strokeStyle = T.plotLine;
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 2;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.shadowColor = T.accentGlow;
-      ctx.shadowBlur = 6;
+      ctx.shadowColor = "rgba(51,255,102,0.6)";
+      ctx.shadowBlur = 10;
       ctx.beginPath();
       let first = true;
       if (drawnWave) {
@@ -322,15 +369,15 @@ function PianoKeyboard({ activeNotes, onNoteOn, onNoteOff }) {
   };
 
   const whiteStyle = (n) => ({
-    flex: 1, borderRadius: "0 0 8px 8px",
-    border: `1px solid ${active.has(n) ? T.accent : "rgba(0,0,0,0.12)"}`,
-    cursor: "pointer", transition: "all 80ms",
+    flex: 1, borderRadius: "0 0 3px 3px",
+    border: `1px solid ${active.has(n) ? T.accent : "rgba(60,50,30,0.5)"}`,
+    cursor: "pointer", transition: "all 60ms",
     background: active.has(n)
-      ? `linear-gradient(180deg, #c4b5fd 0%, ${T.accent} 100%)`
-      : "linear-gradient(180deg, #fff 0%, #f1f5f9 100%)",
+      ? `linear-gradient(180deg, #ffcc66 0%, ${T.accent} 100%)`
+      : "linear-gradient(180deg, #f5ead0 0%, #e0d0b0 100%)",
     boxShadow: active.has(n)
-      ? `0 0 12px ${T.accentGlow}`
-      : "0 2px 4px rgba(0,0,0,0.08)",
+      ? `0 0 14px ${T.accentGlow}, inset 0 -2px 4px rgba(0,0,0,0.15)`
+      : "inset 0 -3px 6px rgba(0,0,0,0.1), 0 2px 3px rgba(0,0,0,0.2)",
   });
 
   const blackStyle = (n) => {
@@ -338,14 +385,14 @@ function PianoKeyboard({ activeNotes, onNoteOn, onNoteOff }) {
     return {
       position: "absolute", left: `${left}%`, width: `${bw}%`,
       top: 0, height: "60%", zIndex: 10,
-      borderRadius: "0 0 5px 5px", cursor: "pointer",
-      transition: "all 80ms",
+      borderRadius: "0 0 3px 3px", cursor: "pointer",
+      transition: "all 60ms",
       background: active.has(n)
-        ? `linear-gradient(180deg, ${T.accent} 0%, #4338ca 100%)`
-        : "linear-gradient(180deg, #334155 0%, #1e293b 100%)",
+        ? `linear-gradient(180deg, ${T.accent} 0%, #8b4500 100%)`
+        : "linear-gradient(180deg, #2a2218 0%, #181208 100%)",
       boxShadow: active.has(n)
-        ? `0 0 10px ${T.accentGlow}`
-        : "0 3px 6px rgba(0,0,0,0.3)",
+        ? `0 0 12px ${T.accentGlow}`
+        : "inset 0 -2px 4px rgba(0,0,0,0.4), 0 3px 6px rgba(0,0,0,0.5)",
     };
   };
 
@@ -379,11 +426,13 @@ function PianoKeyboard({ activeNotes, onNoteOn, onNoteOff }) {
 function Pill({ children, glow = false }) {
   return (
     <span style={{
-      display: "inline-flex", alignItems: "center", gap: 4,
-      padding: "4px 12px", fontSize: 12, fontWeight: 500,
-      borderRadius: 100, background: glow ? T.accentSoft : T.raised,
-      color: glow ? T.accent : T.textDim,
-      border: `1px solid ${glow ? "rgba(108,99,255,0.3)" : T.border}`,
+      display: "inline-flex", alignItems: "center", gap: 5,
+      padding: "4px 10px", fontSize: 10, fontWeight: 700,
+      fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase",
+      borderRadius: 2, background: glow ? "rgba(232,133,12,0.12)" : "#1a1510",
+      color: glow ? T.amber : T.textDim,
+      border: `1px solid ${glow ? "rgba(255,180,60,0.3)" : T.border}`,
+      boxShadow: glow ? "0 0 6px rgba(232,133,12,0.15)" : "none",
     }}>
       {children}
     </span>
@@ -394,17 +443,22 @@ function Pill({ children, glow = false }) {
 function Section({ title, icon, children, style: outerStyle }) {
   return (
     <div style={{
-      background: T.surfaceAlt, border: `1px solid ${T.border}`,
-      borderRadius: T.radiusLg, padding: 18,
+      background: "linear-gradient(180deg, #211c14 0%, #1a1510 100%)",
+      border: `1px solid ${T.border}`,
+      borderTop: `1px solid ${T.borderHi}`,
+      borderRadius: T.radiusLg, padding: 16,
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03), 0 2px 8px rgba(0,0,0,0.3)",
       ...outerStyle,
     }}>
       {title && (
         <div style={{
-          fontSize: 12, fontWeight: 700, textTransform: "uppercase",
-          letterSpacing: 1.2, color: T.textDim, marginBottom: 14,
+          fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+          letterSpacing: 2, color: T.amber, marginBottom: 12,
           display: "flex", alignItems: "center", gap: 8,
+          fontFamily: T.font,
+          borderBottom: `1px solid ${T.border}`, paddingBottom: 8,
         }}>
-          {icon && <span style={{ fontSize: 14 }}>{icon}</span>}
+          {icon && <span style={{ fontSize: 12 }}>{icon}</span>}
           {title}
         </div>
       )}
@@ -417,19 +471,19 @@ function Section({ title, icon, children, style: outerStyle }) {
 function FeaturePlaceholder({ label, description }) {
   return (
     <div style={{
-      padding: "14px 16px", borderRadius: T.radius,
-      border: `1px dashed ${T.borderHi}`, background: "rgba(108,99,255,0.03)",
+      padding: "12px 14px", borderRadius: T.radius,
+      border: `1px dashed ${T.borderHi}`, background: "rgba(232,133,12,0.03)",
       display: "flex", alignItems: "center", gap: 12,
     }}>
       <span style={{
-        width: 32, height: 32, borderRadius: 8,
+        width: 28, height: 28, borderRadius: 3,
         background: T.accentSoft, display: "flex",
         alignItems: "center", justifyContent: "center",
-        fontSize: 14, color: T.accent, flexShrink: 0,
-      }}>✦</span>
+        fontSize: 12, color: T.accent, flexShrink: 0,
+      }}>♦</span>
       <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{label}</div>
-        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>{description}</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: T.text, fontFamily: T.font, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
+        <div style={{ fontSize: 10, color: T.textMuted, marginTop: 2 }}>{description}</div>
       </div>
     </div>
   );
@@ -545,9 +599,9 @@ function Spectrum({ analyserRef }) {
       for (let i = 0; i < bufLen; i++) {
         const barH = (data[i] / 255) * h;
         const ratio = i / bufLen;
-        const r = Math.round(108 + ratio * 147);
-        const g = Math.round(99 - ratio * 40);
-        const b = Math.round(255 - ratio * 80);
+        const r = Math.round(40 + ratio * 200);
+        const g = Math.round(255 - ratio * 160);
+        const b = Math.round(20 + ratio * 10);
         ctx.fillStyle = `rgb(${r},${g},${b})`;
         ctx.fillRect(i * barW, h - barH, Math.max(barW - 1, 1), barH);
       }
@@ -687,16 +741,19 @@ function WaveDrawer({ onUseWave }) {
   }, [wave]);
 
   const btnTool = (lbl, id) => ({
-    height: 32, padding: "0 14px", fontSize: 12, fontWeight: 600,
+    height: 30, padding: "0 14px", fontSize: 10, fontWeight: 700,
+    fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase",
     border: `1px solid ${tool === id ? T.accent : T.border}`,
-    borderRadius: 8, cursor: "pointer",
-    background: tool === id ? T.accentSoft : T.raised,
-    color: tool === id ? T.accent : T.textDim,
+    borderRadius: 2, cursor: "pointer",
+    background: tool === id ? "linear-gradient(180deg, #cc6e08, #a05500)" : "linear-gradient(180deg, #2e2820, #1a1510)",
+    color: tool === id ? "#f0e6d2" : T.textDim,
+    boxShadow: tool === id ? `0 0 8px ${T.accentGlow}` : "none",
   });
   const btnAction = {
-    height: 32, padding: "0 14px", fontSize: 12, fontWeight: 600,
-    border: `1px solid ${T.border}`, borderRadius: 8, cursor: "pointer",
-    background: T.raised, color: T.textDim,
+    height: 30, padding: "0 14px", fontSize: 10, fontWeight: 700,
+    fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase",
+    border: `1px solid ${T.border}`, borderRadius: 2, cursor: "pointer",
+    background: "linear-gradient(180deg, #2e2820, #1a1510)", color: T.textDim,
   };
 
   return (
@@ -745,13 +802,16 @@ function WaveDrawer({ onUseWave }) {
           <button
             onClick={() => onUseWave(wave)}
             style={{
-              height: 44, padding: "0 32px", fontSize: 14, fontWeight: 700,
-              border: "none", borderRadius: 10, cursor: "pointer",
-              background: T.accent, color: T.white,
-              boxShadow: `0 2px 12px ${T.accentGlow}`,
+              height: 42, padding: "0 32px", fontSize: 12, fontWeight: 700,
+              fontFamily: T.font, letterSpacing: 1.5, textTransform: "uppercase",
+              border: `1px solid rgba(255,180,60,0.3)`,
+              borderRadius: 3, cursor: "pointer",
+              background: "linear-gradient(180deg, #cc6e08, #a05500)",
+              color: "#f0e6d2",
+              boxShadow: `0 2px 12px ${T.accentGlow}, inset 0 1px 0 rgba(255,255,255,0.1)`,
             }}
           >
-            Use Wave in Synth →
+            USE WAVE IN SYNTH →
           </button>
         </div>
       )}
@@ -1413,16 +1473,21 @@ export default function GraphingCalculatorSynthApp() {
   // ── Button styles ─────────────────────────────────────────────────
   const btnPrimary = {
     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
-    height: 40, padding: "0 20px", borderRadius: 10,
-    border: "none", background: T.accent, color: T.white,
-    fontSize: 13, fontWeight: 600, cursor: "pointer",
-    boxShadow: `0 2px 12px ${T.accentGlow}`,
-    transition: "all 150ms",
+    height: 38, padding: "0 18px", borderRadius: 3,
+    border: "1px solid rgba(255,180,60,0.3)",
+    background: "linear-gradient(180deg, #cc6e08 0%, #a05500 100%)",
+    color: "#f0e6d2",
+    fontSize: 12, fontWeight: 700, cursor: "pointer",
+    fontFamily: T.font, textTransform: "uppercase", letterSpacing: 1,
+    boxShadow: `0 2px 8px ${T.accentGlow}, inset 0 1px 0 rgba(255,255,255,0.1)`,
+    transition: "all 100ms",
   };
   const btnGhost = {
     ...btnPrimary,
-    background: T.raised, color: T.text,
-    border: `1px solid ${T.border}`, boxShadow: "none",
+    background: "linear-gradient(180deg, #2e2820 0%, #1a1510 100%)",
+    color: T.text,
+    border: `1px solid ${T.borderHi}`,
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 4px rgba(0,0,0,0.3)",
   };
 
   // ═════════════════════════════════════════════════════════════════
@@ -1433,30 +1498,36 @@ export default function GraphingCalculatorSynthApp() {
       minHeight: "100vh", background: T.bg, color: T.text,
       fontFamily: T.font, WebkitFontSmoothing: "antialiased",
     }}>
+      {/* CRT scanline overlay */}
+      <div className="crt-overlay" />
       {/* ── top bar ──────────────────────────────────────────────── */}
       <div style={{
-        height: 48, background: T.surface,
-        borderBottom: `1px solid ${T.border}`,
+        height: 52, background: "linear-gradient(180deg, #2a2218 0%, #1a1510 100%)",
+        borderBottom: `2px solid ${T.borderHi}`,
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0 24px", position: "sticky", top: 0, zIndex: 100,
+        boxShadow: "0 2px 12px rgba(0,0,0,0.5)",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{
-            width: 28, height: 28, borderRadius: 8,
-            background: `linear-gradient(135deg, ${T.accent}, #4338ca)`,
+            width: 30, height: 30, borderRadius: 3,
+            background: "linear-gradient(135deg, #cc6e08, #ff9922)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 14,
+            fontSize: 16, color: "#0d0b08", fontWeight: 900,
+            boxShadow: "0 0 10px rgba(232,133,12,0.4)",
           }}>∿</span>
-          <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.3 }}>WaveCraft</span>
-          <span style={{ fontSize: 11, color: T.textMuted, fontWeight: 500, marginLeft: 4 }}>v0.1</span>
+          <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase", color: T.amber }}>WaveCraft</span>
+          <span style={{ fontSize: 10, color: T.textMuted, fontWeight: 500, marginLeft: 4, letterSpacing: 2 }}>v0.1</span>
           <div style={{ display: "flex", marginLeft: 16, gap: 2 }}>
-            {[{ id: "synth", label: "🎹 Synth" }, { id: "draw", label: "✏️ Draw" }].map((tab) => (
+            {[{ id: "synth", label: "SYNTH" }, { id: "draw", label: "DRAW" }].map((tab) => (
               <button key={tab.id} onClick={() => setPage(tab.id)} style={{
-                height: 30, padding: "0 14px", fontSize: 12, fontWeight: 600,
-                border: `1px solid ${page === tab.id ? T.accent : T.border}`,
-                borderRadius: 6, cursor: "pointer",
-                background: page === tab.id ? T.accentSoft : "transparent",
-                color: page === tab.id ? T.accent : T.textDim,
+                height: 28, padding: "0 14px", fontSize: 11, fontWeight: 700,
+                fontFamily: T.font, letterSpacing: 1.5, textTransform: "uppercase",
+                border: `1px solid ${page === tab.id ? T.accent : T.borderHi}`,
+                borderRadius: 2, cursor: "pointer",
+                background: page === tab.id ? "linear-gradient(180deg, #cc6e08, #a05500)" : "linear-gradient(180deg, #2e2820, #1a1510)",
+                color: page === tab.id ? "#f0e6d2" : T.textDim,
+                boxShadow: page === tab.id ? `0 0 8px ${T.accentGlow}` : "none",
               }}>{tab.label}</button>
             ))}
           </div>
@@ -1492,12 +1563,12 @@ export default function GraphingCalculatorSynthApp() {
               {/* equation input */}
               <div style={{ display: "flex", gap: 0, marginTop: 14 }}>
                 <div style={{
-                  background: T.raised, border: `1px solid ${T.border}`,
+                  background: "#181208", border: `1px solid ${T.borderHi}`,
                   borderRadius: `${T.radius}px 0 0 ${T.radius}px`,
-                  padding: "0 12px", display: "flex", alignItems: "center",
-                  fontSize: 12, fontWeight: 600, color: T.textDim,
-                  textTransform: "uppercase", letterSpacing: 0.8,
-                  whiteSpace: "nowrap",
+                  padding: "0 10px", display: "flex", alignItems: "center",
+                  fontSize: 11, fontWeight: 700, color: T.amber,
+                  textTransform: "uppercase", letterSpacing: 1.5,
+                  whiteSpace: "nowrap", fontFamily: T.font,
                 }}>
                   f(x) =
                 </div>
@@ -1508,24 +1579,25 @@ export default function GraphingCalculatorSynthApp() {
                   placeholder="sin(x)"
                   spellCheck={false}
                   style={{
-                    flex: 1, height: 42, fontSize: 15, padding: "0 12px",
-                    background: T.surface, color: T.white,
+                    flex: 1, height: 40, fontSize: 14, padding: "0 12px",
+                    background: "#0a0f0a", color: T.green,
                     border: `1px solid ${T.border}`, borderLeft: "none", borderRight: "none",
-                    outline: "none", fontFamily: "'JetBrains Mono', monospace",
-                    minWidth: 0,
+                    outline: "none", fontFamily: "'Share Tech Mono', 'Courier New', monospace",
+                    minWidth: 0, textShadow: "0 0 6px rgba(51,255,102,0.3)",
                   }}
                 />
                 <button onClick={applyEquation} style={{
                   ...btnPrimary, borderRadius: 0,
-                  height: 42, padding: "0 18px", fontSize: 12, letterSpacing: 0.5,
+                  height: 40, padding: "0 16px", fontSize: 10, letterSpacing: 1.5,
                 }}>
                   APPLY
                 </button>
                 <button onClick={() => { drawnWaveRef.current = null; setEquationInput(DEFAULT_EQ); setEquation(DEFAULT_EQ); lastEquationRef.current = DEFAULT_EQ; compileEquation(DEFAULT_EQ); }} title="Reset to default" style={{
-                  height: 42, padding: "0 12px", fontSize: 16,
-                  background: T.raised, color: T.textMuted, border: `1px solid ${T.border}`, borderLeft: "none",
+                  height: 40, padding: "0 12px", fontSize: 14,
+                  background: "linear-gradient(180deg, #2e2820, #1a1510)", color: T.textMuted,
+                  border: `1px solid ${T.border}`, borderLeft: "none",
                   borderRadius: `0 ${T.radius}px ${T.radius}px 0`,
-                  cursor: "pointer",
+                  cursor: "pointer", fontFamily: T.font,
                 }}>
                   ↺
                 </button>
@@ -1540,14 +1612,19 @@ export default function GraphingCalculatorSynthApp() {
 
             {/* Presets */}
             <Section title="Presets" icon="🎨" style={{ marginTop: 12 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
                 {PRESETS.map((p) => (
                   <button key={p.name} onClick={() => applyPreset(p)} style={{
-                    padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`,
-                    background: equation === p.eq ? T.accentSoft : T.raised,
-                    color: equation === p.eq ? T.accent : T.text,
-                    fontSize: 12, fontWeight: 600, cursor: "pointer",
-                    textAlign: "left", transition: "all 120ms",
+                    padding: "7px 10px", borderRadius: 2,
+                    border: `1px solid ${equation === p.eq ? T.accent : T.border}`,
+                    background: equation === p.eq
+                      ? "linear-gradient(180deg, #cc6e08, #a05500)"
+                      : "linear-gradient(180deg, #2e2820, #1a1510)",
+                    color: equation === p.eq ? "#f0e6d2" : T.textDim,
+                    fontSize: 10, fontWeight: 700, cursor: "pointer",
+                    textAlign: "left", transition: "all 80ms",
+                    fontFamily: T.font, letterSpacing: 0.8, textTransform: "uppercase",
+                    boxShadow: equation === p.eq ? `0 0 8px ${T.accentGlow}` : "inset 0 1px 0 rgba(255,255,255,0.04)",
                   }}>
                     {p.name}
                   </button>
@@ -1571,7 +1648,7 @@ export default function GraphingCalculatorSynthApp() {
                   }}
                 />
                 <button onClick={saveUserPreset} disabled={!newPresetName.trim()} style={{
-                  ...btnPrimary, height: 36, padding: "0 14px", fontSize: 12,
+                  ...btnPrimary, height: 34, padding: "0 14px", fontSize: 10,
                   opacity: newPresetName.trim() ? 1 : 0.4,
                   cursor: newPresetName.trim() ? "pointer" : "not-allowed",
                 }}>
@@ -1583,17 +1660,19 @@ export default function GraphingCalculatorSynthApp() {
                   No saved presets yet
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                   {userPresets.map((p) => (
                     <div key={p.name} style={{
                       display: "flex", alignItems: "center", gap: 6,
-                      padding: "6px 10px", borderRadius: 8,
-                      border: `1px solid ${T.border}`, background: T.raised,
+                      padding: "5px 10px", borderRadius: 2,
+                      border: `1px solid ${T.border}`,
+                      background: "linear-gradient(180deg, #2e2820, #1a1510)",
                     }}>
                       <button onClick={() => loadUserPreset(p)} style={{
                         flex: 1, background: "none", border: "none",
-                        color: T.text, fontSize: 12, fontWeight: 600,
+                        color: T.text, fontSize: 10, fontWeight: 700,
                         cursor: "pointer", textAlign: "left", padding: 0,
+                        fontFamily: T.font, letterSpacing: 0.8, textTransform: "uppercase",
                       }}>
                         {p.name}
                       </button>
@@ -1636,20 +1715,21 @@ export default function GraphingCalculatorSynthApp() {
                 <button
                   onClick={() => setAdd7th((v) => !v)}
                   style={{
-                    height: 28, padding: "0 12px", fontSize: 11, fontWeight: 700,
+                    height: 24, padding: "0 10px", fontSize: 9, fontWeight: 700,
+                    fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase",
                     border: `1px solid ${add7th ? T.accent : T.border}`,
-                    borderRadius: 6, cursor: "pointer",
-                    background: add7th ? T.accentSoft : T.raised,
-                    color: add7th ? T.accent : T.textDim,
-                    letterSpacing: 0.5,
+                    borderRadius: 2, cursor: "pointer",
+                    background: add7th ? "linear-gradient(180deg, #cc6e08, #a05500)" : "linear-gradient(180deg, #2e2820, #1a1510)",
+                    color: add7th ? "#f0e6d2" : T.textDim,
+                    boxShadow: add7th ? `0 0 6px ${T.accentGlow}` : "none",
                   }}
                 >
                   +7th
                 </button>
               </div>
               <PianoKeyboard activeNotes={activeNotes} onNoteOn={wrappedNoteOn} onNoteOff={wrappedNoteOff} />
-              <div style={{ fontSize: 11, color: T.textMuted, marginTop: 10, textAlign: "center" }}>
-                C3 — C5 · Click or use a MIDI controller
+              <div style={{ fontSize: 9, color: T.textMuted, marginTop: 10, textAlign: "center", fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase" }}>
+                C3 — C5 · Click or use MIDI
               </div>
             </Section>
 
@@ -1689,9 +1769,9 @@ export default function GraphingCalculatorSynthApp() {
                   onClick={() => setLoopEnabled(!loopEnabled)}
                   style={{
                     ...btnGhost,
-                    background: loopEnabled ? T.accentSoft : T.raised,
-                    color: loopEnabled ? T.accent : T.text,
-                    border: `1px solid ${loopEnabled ? "rgba(108,99,255,0.4)" : T.border}`,
+                    background: loopEnabled ? "linear-gradient(180deg, #cc6e08, #a05500)" : "linear-gradient(180deg, #2e2820, #1a1510)",
+                    color: loopEnabled ? "#f0e6d2" : T.text,
+                    border: `1px solid ${loopEnabled ? "rgba(255,180,60,0.4)" : T.border}`,
                     cursor: "pointer", userSelect: "none",
                   }}
                 >
@@ -1789,40 +1869,41 @@ export default function GraphingCalculatorSynthApp() {
                 const isOpen = openEffect === fx.id;
                 return (
                   <div key={fx.id} style={{
-                    marginBottom: 6, borderRadius: T.radius,
-                    border: `1px solid ${fp.enabled ? "rgba(108,99,255,0.3)" : T.border}`,
+                    marginBottom: 4, borderRadius: T.radius,
+                    border: `1px solid ${fp.enabled ? "rgba(255,180,60,0.25)" : T.border}`,
                     background: fp.enabled ? T.accentSoft : T.surface,
-                    overflow: "hidden", transition: "all 150ms",
+                    overflow: "hidden", transition: "all 100ms",
                   }}>
                     <div
                       onClick={() => setOpenEffect(isOpen ? null : fx.id)}
                       style={{
                         display: "flex", alignItems: "center", gap: 10,
-                        padding: "10px 14px", cursor: "pointer", userSelect: "none",
+                        padding: "8px 12px", cursor: "pointer", userSelect: "none",
                       }}
                     >
-                      <span style={{ fontSize: 14 }}>{fx.icon}</span>
-                      <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: T.text }}>{fx.label}</span>
+                      <span style={{ fontSize: 12 }}>{fx.icon}</span>
+                      <span style={{ flex: 1, fontSize: 10, fontWeight: 700, color: T.text, fontFamily: T.font, textTransform: "uppercase", letterSpacing: 1 }}>{fx.label}</span>
                       <div
                         onClick={(e) => { e.stopPropagation(); updateFx(fx.id, "enabled", !fp.enabled); }}
                         style={{
-                          width: 36, height: 20, borderRadius: 10, padding: 2,
-                          background: fp.enabled ? T.accent : T.raised,
+                          width: 32, height: 16, borderRadius: 2, padding: 2,
+                          background: fp.enabled ? T.accent : "#181208",
                           border: `1px solid ${fp.enabled ? T.accent : T.borderHi}`,
-                          cursor: "pointer", transition: "all 150ms",
+                          cursor: "pointer", transition: "all 100ms",
                           display: "flex", alignItems: "center",
                           justifyContent: fp.enabled ? "flex-end" : "flex-start",
+                          boxShadow: fp.enabled ? `0 0 6px ${T.accentGlow}` : "none",
                         }}
                       >
                         <div style={{
-                          width: 14, height: 14, borderRadius: "50%",
-                          background: T.white, transition: "all 150ms",
+                          width: 10, height: 10, borderRadius: 1,
+                          background: fp.enabled ? "#f0e6d2" : T.textMuted, transition: "all 100ms",
                         }} />
                       </div>
                       <span style={{
-                        fontSize: 16, color: T.textDim,
+                        fontSize: 14, color: T.textDim,
                         transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
-                        transition: "transform 150ms",
+                        transition: "transform 100ms",
                       }}>›</span>
                     </div>
                     {isOpen && (
@@ -1959,27 +2040,27 @@ export default function GraphingCalculatorSynthApp() {
             </Section>
 
             <Section title="Quick Reference" icon="📖">
-              <div style={{ fontSize: 12, lineHeight: 1.8, color: T.textDim }}>
-                <div><b style={{ color: T.text }}>x</b> — waveform phase input</div>
-                <div><b style={{ color: T.text }}>t</b> — time in seconds</div>
-                <div><b style={{ color: T.text }}>freq</b> — note frequency (Hz)</div>
-                <div><b style={{ color: T.text }}>note</b> — MIDI note number</div>
-                <div><b style={{ color: T.text }}>velocity</b> — key velocity (0–1)</div>
-                <div><b style={{ color: T.text }}>a b c d</b> — slider parameters</div>
+              <div style={{ fontSize: 10, lineHeight: 2, color: T.textDim, fontFamily: T.font }}>
+                <div><b style={{ color: T.amber }}>x</b> — waveform phase input</div>
+                <div><b style={{ color: T.amber }}>t</b> — time in seconds</div>
+                <div><b style={{ color: T.amber }}>freq</b> — note frequency (Hz)</div>
+                <div><b style={{ color: T.amber }}>note</b> — MIDI note number</div>
+                <div><b style={{ color: T.amber }}>velocity</b> — key velocity (0–1)</div>
+                <div><b style={{ color: T.amber }}>a b c d</b> — slider parameters</div>
               </div>
               <div style={{
-                marginTop: 12, padding: 10, borderRadius: 8,
-                background: T.surface, border: `1px solid ${T.border}`,
+                marginTop: 12, padding: 10, borderRadius: 3,
+                background: "#0a0f0a", border: `1px solid ${T.border}`,
                 fontSize: 12, color: T.textDim, lineHeight: 1.8,
-                fontFamily: "'JetBrains Mono', monospace",
+                fontFamily: "'Share Tech Mono', 'Courier New', monospace",
               }}>
-                <div style={{ color: T.textMuted, fontSize: 10, fontWeight: 600, marginBottom: 4, fontFamily: T.font, textTransform: "uppercase", letterSpacing: 1 }}>
+                <div style={{ color: T.textMuted, fontSize: 9, fontWeight: 700, marginBottom: 4, fontFamily: T.font, textTransform: "uppercase", letterSpacing: 1.5 }}>
                   Try these
                 </div>
-                <div style={{ color: T.accent }}>sin(x)</div>
-                <div style={{ color: T.accent }}>sin(a*x) + 0.2*sin(3*x)</div>
-                <div style={{ color: T.accent }}>tanh(sin(x) + b*sin(2*x))</div>
-                <div style={{ color: T.accent }}>sin(x) * exp(-0.001*t)</div>
+                <div style={{ color: T.green, textShadow: "0 0 6px rgba(51,255,102,0.3)" }}>sin(x)</div>
+                <div style={{ color: T.green, textShadow: "0 0 6px rgba(51,255,102,0.3)" }}>sin(a*x) + 0.2*sin(3*x)</div>
+                <div style={{ color: T.green, textShadow: "0 0 6px rgba(51,255,102,0.3)" }}>tanh(sin(x) + b*sin(2*x))</div>
+                <div style={{ color: T.green, textShadow: "0 0 6px rgba(51,255,102,0.3)" }}>sin(x) * exp(-0.001*t)</div>
               </div>
             </Section>
 
