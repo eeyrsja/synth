@@ -1,6 +1,6 @@
 # WaveCraft
 
-WaveCraft is a browser synth for people who think a graphing calculator should be allowed to headline a gig.
+WaveCraft is a browser synth for people who think a graphing calculator should be allowed to headline a gig...
 
 Type an equation like `sin(x + a*sin(b*x))`, or draw a waveform by hand, and the app turns it into a playable instrument. Then it lets you bend that sound through envelopes, filters, effects, live visualizers, recording, looping, and export.
 
