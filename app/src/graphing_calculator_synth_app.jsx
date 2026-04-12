@@ -29,6 +29,39 @@ const LFO_TARGETS = [
 
 const DEFAULT_LFO = { enabled: false, shape: "sine", rate: 1, depth: 0, target: "a", phase: 0 };
 
+const DEFAULT_ADSR = { attack: 0.012, decay: 0.18, sustain: 0.78, release: 0.22 };
+const DEFAULT_FILTER = { type: "allpass", cutoff: 18000, resonance: 0.7 };
+const DEFAULT_FX_PARAMS = {
+  distortion: { enabled: false, drive: 8, tone: 0.45, mix: 0.8, asym: 0.15 },
+  squelch:    { enabled: false, mix: 0.45, cutoff: 850, resonance: 14, rate: 2.4, depth: 0.6 },
+  chorus:     { enabled: false, mix: 0.5, rate: 1.5, depth: 0.005 },
+  delay:      { enabled: false, mix: 0.3, time: 0.35, feedback: 0.4 },
+  reverb:     { enabled: false, mix: 0.3, decay: 2.0 },
+};
+
+const withFxDefaults = (fx = {}) => ({
+  distortion: { ...DEFAULT_FX_PARAMS.distortion, ...(fx.distortion || {}) },
+  squelch: { ...DEFAULT_FX_PARAMS.squelch, ...(fx.squelch || {}) },
+  chorus: { ...DEFAULT_FX_PARAMS.chorus, ...(fx.chorus || {}) },
+  delay: { ...DEFAULT_FX_PARAMS.delay, ...(fx.delay || {}) },
+  reverb: { ...DEFAULT_FX_PARAMS.reverb, ...(fx.reverb || {}) },
+});
+
+const PRESET_ADSRS = {
+  "Pure Sine": { attack: 0.02, decay: 0.15, sustain: 0.85, release: 0.2 },
+  "FM Bell": { attack: 0.002, decay: 1.2, sustain: 0.0, release: 1.1 },
+  "Warm Saw": { attack: 0.02, decay: 0.28, sustain: 0.72, release: 0.35 },
+  "Fat Square": { attack: 0.004, decay: 0.2, sustain: 0.8, release: 0.24 },
+  "Organ": { attack: 0.01, decay: 0.08, sustain: 0.92, release: 0.18 },
+  "Chirp": { attack: 0.001, decay: 0.22, sustain: 0.0, release: 0.08 },
+  "PWM": { attack: 0.003, decay: 0.14, sustain: 0.74, release: 0.16 },
+  "Metallic": { attack: 0.001, decay: 0.75, sustain: 0.12, release: 0.45 },
+  "Sub Bass": { attack: 0.008, decay: 0.18, sustain: 0.88, release: 0.24 },
+  "Pluck": { attack: 0.001, decay: 0.32, sustain: 0.0, release: 0.12 },
+  "Noise Ring": { attack: 0.002, decay: 0.5, sustain: 0.22, release: 0.3 },
+  "Alien": { attack: 0.015, decay: 0.4, sustain: 0.5, release: 0.5 },
+};
+
 function lfoSample(shape, phase, prevSH) {
   const p = ((phase % 1) + 1) % 1;
   switch (shape) {
@@ -54,7 +87,17 @@ const PRESETS = [
   { name: "Pluck",      eq: "sin(x) * exp(-a*t) * (1 + b*sin(3*x))",            a: 3,      b: 0.5,  c: 0,     d: 0 },
   { name: "Noise Ring", eq: "tanh(sin(x) + a*sin(x*1.01) + b*sin(x*2.99))",     a: 0.8,    b: 0.4,  c: 0,     d: 0 },
   { name: "Alien",      eq: "sin(a*x) * cos(b*x) + c*sin(d*x)",                 a: 1,      b: 0.5,  c: 0.3,   d: 3 },
-];
+].map((preset) => ({
+  ...preset,
+  adsr: { ...DEFAULT_ADSR, ...(PRESET_ADSRS[preset.name] || {}) },
+  filter: { ...DEFAULT_FILTER },
+  fxParams: withFxDefaults(),
+  lfos: [
+    { ...DEFAULT_LFO },
+    { ...DEFAULT_LFO, target: "b" },
+    { ...DEFAULT_LFO, target: "cutoff" },
+  ],
+}));
 
 function generateIR(ctx, decay) {
   const len = Math.floor(ctx.sampleRate * clamp(decay, 0.1, 5));
@@ -142,8 +185,14 @@ if (typeof document !== "undefined" && !document.getElementById("crt-style")) {
 };
 
 // ─── Slider ─────────────────────────────────────────────────────────
-function Knob({ label, value, onChange, min = -5, max = 5, step = 0.001, compact = false, defaultValue }) {
+function Knob({ label, value, onChange, min = -5, max = 5, step = 0.001, compact = false, defaultValue, lfoMod }) {
   const showReset = defaultValue !== undefined && value !== defaultValue;
+  const hasLfo = lfoMod != null && lfoMod !== 0;
+  const modulated = hasLfo ? clamp(value + lfoMod, min, max) : value;
+  // Compute positions as % of range for the LFO bar
+  const range = max - min;
+  const valuePct = ((value - min) / range) * 100;
+  const modPct = hasLfo ? ((modulated - min) / range) * 100 : valuePct;
   return (
     <div style={{ marginBottom: compact ? 8 : 12 }}>
       <div style={{
@@ -152,6 +201,7 @@ function Knob({ label, value, onChange, min = -5, max = 5, step = 0.001, compact
       }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: T.textDim, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: T.font }}>
           {label}
+          {hasLfo && <span style={{ color: T.accent, fontSize: 8, marginLeft: 4, opacity: 0.8 }}>LFO</span>}
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {showReset && (
@@ -164,19 +214,62 @@ function Knob({ label, value, onChange, min = -5, max = 5, step = 0.001, compact
               }}
             >↺</button>
           )}
-          <span style={{
-            fontSize: compact ? 13 : 14, fontVariantNumeric: "tabular-nums",
-            color: T.green, fontWeight: 700, fontFamily: "'VT323', 'Courier New', monospace",
-            textShadow: "0 0 8px rgba(51,255,102,0.5)",
-          }}>
-            {value.toFixed(3)}
-          </span>
+          {hasLfo ? (
+            <span style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+              <span style={{
+                fontSize: compact ? 11 : 12, fontVariantNumeric: "tabular-nums",
+                color: T.textDim, fontFamily: "'VT323', 'Courier New', monospace",
+              }}>
+                {value.toFixed(3)}
+              </span>
+              <span style={{
+                fontSize: compact ? 13 : 14, fontVariantNumeric: "tabular-nums",
+                color: T.accent, fontWeight: 700, fontFamily: "'VT323', 'Courier New', monospace",
+                textShadow: `0 0 8px ${T.accentGlow}`,
+              }}>
+                {modulated.toFixed(3)}
+              </span>
+            </span>
+          ) : (
+            <span style={{
+              fontSize: compact ? 13 : 14, fontVariantNumeric: "tabular-nums",
+              color: T.green, fontWeight: 700, fontFamily: "'VT323', 'Courier New', monospace",
+              textShadow: "0 0 8px rgba(51,255,102,0.5)",
+            }}>
+              {value.toFixed(3)}
+            </span>
+          )}
         </span>
       </div>
       <div style={{
         background: "#181208", border: `1px solid ${T.border}`,
         borderRadius: T.radius, padding: "8px 12px",
+        position: "relative",
       }}>
+        {hasLfo && (
+          <div style={{
+            position: "absolute", top: 4, bottom: 4, left: 12, right: 12,
+            pointerEvents: "none",
+          }}>
+            <div style={{
+              position: "absolute",
+              left: `${Math.min(valuePct, modPct)}%`,
+              width: `${Math.abs(modPct - valuePct)}%`,
+              top: "50%", transform: "translateY(-50%)",
+              height: 6, borderRadius: 3,
+              background: `${T.accent}55`,
+              transition: "none",
+            }} />
+            <div style={{
+              position: "absolute",
+              left: `${modPct}%`,
+              top: "50%", transform: "translate(-50%, -50%)",
+              width: 4, height: 12, borderRadius: 2,
+              background: T.accent,
+              boxShadow: `0 0 6px ${T.accentGlow}`,
+            }} />
+          </div>
+        )}
         <input
           type="range" min={min} max={max} step={step}
           value={value}
@@ -185,6 +278,7 @@ function Knob({ label, value, onChange, min = -5, max = 5, step = 0.001, compact
             width: "100%", cursor: "pointer", accentColor: T.accent,
             height: 6, WebkitAppearance: "none", appearance: "none",
             background: "transparent", outline: "none",
+            position: "relative", zIndex: 1,
           }}
         />
       </div>
@@ -193,10 +287,21 @@ function Knob({ label, value, onChange, min = -5, max = 5, step = 0.001, compact
 }
 
 // ─── Rotary Knob ────────────────────────────────────────────────────
-function RotaryKnob({ label, value, onChange, min = 0, max = 1, step = 0.01, size = 52, defaultValue }) {
+function RotaryKnob({ label, value, onChange, min = 0, max = 1, step = 0.01, size = 52, defaultValue, lfoMod, log }) {
   const dragRef = useRef(null);
-  const norm = (value - min) / (max - min);
+  const hasLfo = lfoMod != null && lfoMod !== 0;
+  const modulated = hasLfo ? clamp(value + lfoMod, min, max) : value;
+  // Log scaling helpers: map value ↔ normalized 0–1 via log/exp
+  const toNorm = log
+    ? (v) => Math.log(v / min) / Math.log(max / min)
+    : (v) => (v - min) / (max - min);
+  const fromNorm = log
+    ? (n) => min * Math.pow(max / min, n)
+    : (n) => min + n * (max - min);
+  const norm = toNorm(clamp(value, min, max));
+  const modNorm = hasLfo ? toNorm(clamp(modulated, min, max)) : norm;
   const angle = -135 + norm * 270;
+  const modAngle = -135 + modNorm * 270;
   const r = size / 2;
   const ir = r - 6;
   const tr = r - 3;
@@ -209,14 +314,20 @@ function RotaryKnob({ label, value, onChange, min = 0, max = 1, step = 0.01, siz
   const pRad = toRad(angle);
   const px = r + (ir - 6) * Math.cos(pRad);
   const py = r + (ir - 6) * Math.sin(pRad);
+  // LFO modulated pointer position
+  const mRad = toRad(modAngle);
+  const mpx = r + (tr + 2) * Math.cos(mRad);
+  const mpy = r + (tr + 2) * Math.sin(mRad);
   const showReset = defaultValue !== undefined && Math.abs(value - defaultValue) > step * 0.5;
 
   const onDown = (e) => {
     e.preventDefault();
-    dragRef.current = { y: e.clientY, v: value };
+    const startNorm = toNorm(clamp(value, min, max));
+    dragRef.current = { y: e.clientY, n: startNorm };
     const onMove = (me) => {
       const dy = dragRef.current.y - me.clientY;
-      const nv = clamp(dragRef.current.v + dy * ((max - min) / 150), min, max);
+      const nn = clamp(dragRef.current.n + dy / 150, 0, 1);
+      const nv = clamp(fromNorm(nn), min, max);
       onChange(Math.round(nv / step) * step);
     };
     const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
@@ -229,12 +340,33 @@ function RotaryKnob({ label, value, onChange, min = 0, max = 1, step = 0.01, siz
       <svg width={size} height={size} style={{ cursor: "grab", touchAction: "none" }} onPointerDown={onDown}>
         <path d={arcD(-135, 135, tr)} fill="none" stroke={T.border} strokeWidth={2.5} strokeLinecap="round" />
         {norm > 0.005 && <path d={arcD(-135, angle, tr)} fill="none" stroke={T.accent} strokeWidth={2.5} strokeLinecap="round" />}
+        {hasLfo && modAngle !== angle && (
+          <path
+            d={arcD(Math.min(angle, modAngle), Math.max(angle, modAngle), tr + 0.5)}
+            fill="none" stroke={T.accent} strokeWidth={5} strokeLinecap="round"
+            opacity={0.3}
+          />
+        )}
         <circle cx={r} cy={r} r={ir} fill={T.raised} stroke={T.borderHi} strokeWidth={1} />
         <line x1={r} y1={r} x2={px} y2={py} stroke={T.accent} strokeWidth={2} strokeLinecap="round" />
+        {hasLfo && (
+          <circle cx={mpx} cy={mpy} r={3} fill={T.accent} opacity={0.85}>
+            <animate attributeName="opacity" values="0.85;0.4;0.85" dur="0.6s" repeatCount="indefinite" />
+          </circle>
+        )}
       </svg>
-      <span style={{ fontSize: 8, color: T.textDim, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, fontFamily: T.font }}>{label}</span>
+      <span style={{ fontSize: 8, color: hasLfo ? T.accent : T.textDim, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, fontFamily: T.font }}>
+        {label}{hasLfo ? " ●" : ""}
+      </span>
       <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
-        <span style={{ fontSize: 11, color: T.green, fontVariantNumeric: "tabular-nums", fontFamily: "'VT323', 'Courier New', monospace", textShadow: "0 0 6px rgba(51,255,102,0.4)" }}>{value.toFixed(step < 0.01 ? 3 : 2)}</span>
+        {hasLfo ? (
+          <span style={{ display: "flex", alignItems: "baseline", gap: 2 }}>
+            <span style={{ fontSize: 9, color: T.textDim, fontVariantNumeric: "tabular-nums", fontFamily: "'VT323', 'Courier New', monospace" }}>{value.toFixed(step < 0.01 ? 3 : 2)}</span>
+            <span style={{ fontSize: 11, color: T.accent, fontVariantNumeric: "tabular-nums", fontFamily: "'VT323', 'Courier New', monospace", textShadow: `0 0 6px ${T.accentGlow}` }}>{modulated.toFixed(step < 0.01 ? 3 : 2)}</span>
+          </span>
+        ) : (
+          <span style={{ fontSize: 11, color: T.green, fontVariantNumeric: "tabular-nums", fontFamily: "'VT323', 'Courier New', monospace", textShadow: "0 0 6px rgba(51,255,102,0.4)" }}>{value.toFixed(step < 0.01 ? 3 : 2)}</span>
+        )}
         {showReset && (
           <button
             onClick={() => onChange(defaultValue)}
@@ -251,9 +383,10 @@ function RotaryKnob({ label, value, onChange, min = 0, max = 1, step = 0.01, siz
 }
 
 // ─── Plot ────────────────────────────────────────────────────────────
-function PlotCanvas({ equation, params, xScale, yScale, drawnWave }) {
+function PlotCanvas({ equation, params, xScale, yScale, drawnWave, lfoParams }) {
   const ref = useRef(null);
   const [error, setError] = useState("");
+  const hasLfoMod = lfoParams && (lfoParams.a !== 0 || lfoParams.b !== 0 || lfoParams.c !== 0 || lfoParams.d !== 0);
 
   useEffect(() => {
     const c = ref.current;
@@ -282,12 +415,49 @@ function PlotCanvas({ equation, params, xScale, yScale, drawnWave }) {
 
     try {
       setError("");
+
+      // If LFO is modifying params, draw the modulated waveform first (behind)
+      if (hasLfoMod && !drawnWave) {
+        const modParams = {
+          ...params,
+          a: params.a + (lfoParams?.a || 0),
+          b: params.b + (lfoParams?.b || 0),
+          c: params.c + (lfoParams?.c || 0),
+          d: params.d + (lfoParams?.d || 0),
+        };
+        ctx.strokeStyle = T.accent;
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.shadowColor = T.accentGlow;
+        ctx.shadowBlur = 12;
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        let first = true;
+        const compiled = compile(equation);
+        for (let px = 0; px < W; px++) {
+          const x = ((px / W) * 2 - 1) * 8 * xScale;
+          const scope = { x, t: 0, note: 60, velocity: 1, ...modParams, pi: Math.PI, e: Math.E };
+          let y = compiled.evaluate(scope);
+          if (!Number.isFinite(y)) { first = true; continue; }
+          y = clamp(y, -10, 10);
+          const py = H / 2 - (y / (4 / yScale)) * (H / 2);
+          first ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+          first = false;
+        }
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1.0;
+      }
+
+      // Base waveform (always drawn on top)
       ctx.strokeStyle = T.plotLine;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = hasLfoMod ? 1.5 : 2;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.shadowColor = "rgba(51,255,102,0.6)";
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = hasLfoMod ? 4 : 10;
+      ctx.globalAlpha = hasLfoMod ? 0.5 : 1.0;
       ctx.beginPath();
       let first = true;
       if (drawnWave) {
@@ -317,10 +487,11 @@ function PlotCanvas({ equation, params, xScale, yScale, drawnWave }) {
       }
       ctx.stroke();
       ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1.0;
     } catch (err) {
       setError(err.message || "Invalid equation");
     }
-  }, [equation, params, xScale, yScale, drawnWave]);
+  }, [equation, params, xScale, yScale, drawnWave, lfoParams]);
 
   return (
     <div>
@@ -422,7 +593,7 @@ function PianoKeyboard({ activeNotes, onNoteOn, onNoteOff }) {
   };
 
   return (
-    <div style={{ position: "relative", height: 110, userSelect: "none", touchAction: "none" }}>
+    <div style={{ position: "relative", height: 94, userSelect: "none", touchAction: "none" }}>
       {/* white keys */}
       <div style={{ position: "absolute", inset: 0, display: "flex", gap: 2 }}>
         {whites.map((n) => (
@@ -511,6 +682,104 @@ function FeaturePlaceholder({ label, description }) {
         <div style={{ fontSize: 10, color: T.textMuted, marginTop: 2 }}>{description}</div>
       </div>
     </div>
+  );
+}
+
+// ─── ADSR Envelope Graph ────────────────────────────────────────────
+function AdsrGraph({ adsr }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const cvs = canvasRef.current;
+    if (!cvs) return;
+    const ctx = cvs.getContext("2d");
+    const W = cvs.width, H = cvs.height;
+    const pad = 8;
+    const w = W - pad * 2, h = H - pad * 2;
+    ctx.clearRect(0, 0, W, H);
+
+    ctx.fillStyle = T.plotBg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Grid
+    ctx.strokeStyle = T.plotGrid;
+    ctx.lineWidth = 1;
+    for (let i = 1; i <= 3; i++) {
+      const y = pad + (h * i) / 4;
+      ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(W - pad, y); ctx.stroke();
+    }
+
+    const { attack, decay, sustain, release } = adsr;
+    const sustainHold = Math.max(attack + decay, 0.3) * 0.5;
+    const totalTime = attack + decay + sustainHold + release;
+    const aW = (attack / totalTime) * w;
+    const dW = (decay / totalTime) * w;
+    const sW = (sustainHold / totalTime) * w;
+    const rW = (release / totalTime) * w;
+
+    const x0 = pad, yBot = pad + h, yTop = pad;
+    const ySus = pad + h * (1 - sustain);
+
+    // Fill
+    ctx.beginPath();
+    ctx.moveTo(x0, yBot);
+    ctx.lineTo(x0 + aW, yTop);
+    ctx.lineTo(x0 + aW + dW, ySus);
+    ctx.lineTo(x0 + aW + dW + sW, ySus);
+    ctx.lineTo(x0 + aW + dW + sW + rW, yBot);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(51,255,102,0.08)";
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    ctx.moveTo(x0, yBot);
+    ctx.lineTo(x0 + aW, yTop);
+    ctx.lineTo(x0 + aW + dW, ySus);
+    ctx.lineTo(x0 + aW + dW + sW, ySus);
+    ctx.lineTo(x0 + aW + dW + sW + rW, yBot);
+    ctx.strokeStyle = T.plotLine;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = T.greenGlow;
+    ctx.shadowBlur = 6;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Dots
+    [
+      [x0, yBot], [x0 + aW, yTop], [x0 + aW + dW, ySus],
+      [x0 + aW + dW + sW, ySus], [x0 + aW + dW + sW + rW, yBot],
+    ].forEach(([dx, dy]) => {
+      ctx.beginPath(); ctx.arc(dx, dy, 3, 0, Math.PI * 2);
+      ctx.fillStyle = T.green; ctx.fill();
+    });
+
+    // Labels
+    ctx.font = `9px ${T.font}`;
+    ctx.fillStyle = T.textMuted;
+    ctx.textAlign = "center";
+    ["A", "D", "S", "R"].forEach((l, i) => {
+      const cx = [x0 + aW / 2, x0 + aW + dW / 2, x0 + aW + dW + sW / 2, x0 + aW + dW + sW + rW / 2][i];
+      ctx.fillText(l, cx, H - 2);
+    });
+
+    // Border
+    ctx.strokeStyle = T.border;
+    ctx.lineWidth = 1;
+    ctx.shadowBlur = 0;
+    ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
+  }, [adsr]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={280}
+      height={100}
+      style={{
+        width: "100%", maxWidth: 280, height: 100,
+        display: "block", margin: "0 auto 14px",
+        borderRadius: T.radius,
+      }}
+    />
   );
 }
 
@@ -767,7 +1036,17 @@ function WaveDrawer({ onUseWave }) {
 
   const loadShape = (fn) => {
     const w = new Float32Array(WAVE_RES);
-    for (let i = 0; i < WAVE_RES; i++) w[i] = fn(i / WAVE_RES);
+    let peak = 0;
+    for (let i = 0; i < WAVE_RES; i++) {
+      const v = clamp(fn(i / WAVE_RES), -1.25, 1.25);
+      w[i] = v;
+      peak = Math.max(peak, Math.abs(v));
+    }
+    // Keep every generated preset loud and consistent.
+    if (peak > 0.001) {
+      const inv = 1 / peak;
+      for (let i = 0; i < WAVE_RES; i++) w[i] *= inv;
+    }
     setWave(w);
   };
 
@@ -865,6 +1144,65 @@ function WaveDrawer({ onUseWave }) {
             { name: "Triangle", fn: (t) => 1 - 4 * Math.abs(Math.round(t) - t) },
             { name: "Square", fn: (t) => t < 0.5 ? 1 : -1 },
             { name: "Sawtooth", fn: (t) => 2 * t - 1 },
+            { name: "Pulse 25", fn: (t) => t < 0.25 ? 1 : -1 },
+            { name: "PWM Rich", fn: (t) => {
+              const p = 0.5 + 0.22 * Math.sin(2 * Math.PI * t);
+              return t < p ? 1 : -1;
+            }},
+            { name: "SuperSaw", fn: (t) => {
+              const saw = (ph) => 2 * (ph - Math.floor(ph + 0.5));
+              return 0.28 * saw(t)
+                + 0.2 * saw(t * 1.003)
+                + 0.2 * saw(t * 0.997)
+                + 0.16 * saw(t * 1.009)
+                + 0.16 * saw(t * 0.991);
+            }},
+            { name: "Juno Wire", fn: (t) => {
+              const x = 2 * Math.PI * t;
+              return 0.78 * Math.sin(x) + 0.25 * Math.sin(2 * x) + 0.12 * Math.sin(3 * x);
+            }},
+            { name: "Moog Bass", fn: (t) => {
+              const x = 2 * Math.PI * t;
+              return Math.tanh(1.6 * (0.85 * Math.sin(x) + 0.22 * Math.sin(2 * x) + 0.08 * Math.sin(3 * x)));
+            }},
+            { name: "OB Brass", fn: (t) => {
+              const x = 2 * Math.PI * t;
+              return 0.55 * Math.sin(x) + 0.35 * Math.sin(2 * x) + 0.2 * Math.sin(3 * x) + 0.08 * Math.sin(4 * x);
+            }},
+            { name: "Prophet Sweep", fn: (t) => {
+              const x = 2 * Math.PI * t;
+              const w = 0.35 + 0.2 * Math.sin(x);
+              return Math.sin(x) * (1 - w) + (t < w ? 0.9 : -0.9) * w;
+            }},
+            { name: "TB Squelch", fn: (t) => {
+              const x = 2 * Math.PI * t;
+              const s = 2 * t - 1;
+              return Math.tanh(2.2 * (0.75 * s + 0.35 * Math.sin(x * 2.2) + 0.12 * Math.sin(x * 3.7)));
+            }},
+            { name: "Sync Lead", fn: (t) => {
+              const x = 2 * Math.PI * t;
+              return Math.sin(x + 0.65 * Math.sin(3 * x)) + 0.2 * Math.sin(5 * x);
+            }},
+            { name: "Vox Formant", fn: (t) => {
+              const x = 2 * Math.PI * t;
+              return 0.6 * Math.sin(x) + 0.28 * Math.sin(2.7 * x) + 0.18 * Math.sin(4.1 * x);
+            }},
+            { name: "Glass FM", fn: (t) => {
+              const x = 2 * Math.PI * t;
+              return Math.sin(x + 2.6 * Math.sin(3 * x)) + 0.3 * Math.sin(6 * x);
+            }},
+            { name: "Bell DX", fn: (t) => {
+              const x = 2 * Math.PI * t;
+              return 0.55 * Math.sin(x) + 0.34 * Math.sin(2.7 * x) + 0.22 * Math.sin(7.3 * x);
+            }},
+            { name: "Choir Pad", fn: (t) => {
+              const x = 2 * Math.PI * t;
+              return 0.62 * Math.sin(x) + 0.2 * Math.sin(2 * x + 0.3) + 0.14 * Math.sin(4 * x + 1.1);
+            }},
+            { name: "Reese", fn: (t) => {
+              const x = 2 * Math.PI * t;
+              return Math.tanh(1.8 * (0.65 * Math.sin(x * 0.99) + 0.65 * Math.sin(x * 1.01) + 0.2 * Math.sin(2 * x)));
+            }},
             { name: "Noise", fn: () => Math.random() * 2 - 1 },
           ].map((s) => (
             <button key={s.name} onClick={() => loadShape(s.fn)} style={btnAction}>
@@ -956,7 +1294,7 @@ function triggerDrumSound(ctx, dest, time, type, params, noiseBuf) {
   }
 }
 
-function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
+const DrumMachine = React.forwardRef(function DrumMachine({ audioCtxRef, gainRef, setupAudio, tempo: sharedTempo, onTempoChange, syncPlaying, syncStartAt, syncEpoch, onToggleSync }, ref) {
   const [steps, setSteps] = useState({
     po:  Array(16).fill(0),
     pi:  Array(16).fill(0),
@@ -964,12 +1302,28 @@ function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
   });
   const [playing, setPlaying] = useState(false);
   const [currentStep, setCurrentStep] = useState(-1);
-  const [tempo, setTempo] = useState(120);
+  const [localTempo, setLocalTempo] = useState(120);
+  const tempo = sharedTempo ?? localTempo;
+  const setTempo = onTempoChange ?? setLocalTempo;
   const [drumParams, setDrumParams] = useState({
     po:  { pitch: 150, decay: 0.03, volume: 0.8 },
     pi:  { pitch: 1000, decay: 0.02, volume: 0.6 },
     sha: { pitch: 6000, decay: 0.16, volume: 0.5 },
   });
+
+  React.useImperativeHandle(ref, () => ({
+    getState: () => ({
+      steps: { po: [...steps.po], pi: [...steps.pi], sha: [...steps.sha] },
+      drumParams: JSON.parse(JSON.stringify(drumParams)),
+      drumVolume, padVolume,
+    }),
+    loadState: (s) => {
+      if (s.steps) setSteps({ po: [...s.steps.po], pi: [...s.steps.pi], sha: [...s.steps.sha] });
+      if (s.drumParams) setDrumParams(JSON.parse(JSON.stringify(s.drumParams)));
+      if (s.drumVolume != null) setDrumVolume(s.drumVolume);
+      if (s.padVolume != null) setPadVolume(s.padVolume);
+    },
+  }));
 
   const stepsRef = useRef(steps);
   stepsRef.current = steps;
@@ -983,6 +1337,7 @@ function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
   const noiseBufferRef = useRef(null);
   const drumGainRef = useRef(null);
   const [drumVolume, setDrumVolume] = useState(0.8);
+  const [padVolume, setPadVolume] = useState(0.85);
 
   useEffect(() => {
     if (drumGainRef.current) drumGainRef.current.gain.value = drumVolume;
@@ -1012,11 +1367,14 @@ function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
     return g;
   }, [audioCtxRef, gainRef]);
 
-  const triggerSound = useCallback((type, time) => {
+  const triggerSound = useCallback((type, time, level = 1) => {
     const ctx = audioCtxRef.current;
-    const dest = getDrumDest();
-    if (!ctx || !dest) return;
-    triggerDrumSound(ctx, dest, time, type, drumParamsRef.current[type], ensureNoiseBuf());
+    const baseDest = getDrumDest();
+    if (!ctx || !baseDest) return;
+    const hitGain = ctx.createGain();
+    hitGain.gain.value = level;
+    hitGain.connect(baseDest);
+    triggerDrumSound(ctx, hitGain, time, type, drumParamsRef.current[type], ensureNoiseBuf());
   }, [audioCtxRef, getDrumDest, ensureNoiseBuf]);
 
   const scheduler = useCallback(() => {
@@ -1036,16 +1394,16 @@ function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
     }
   }, [audioCtxRef, triggerSound]);
 
-  const startSequencer = useCallback(async () => {
-    if (!audioCtxRef.current) await setupAudio();
-    else if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume();
+  const startSequencerAt = useCallback((startAt) => {
     const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    if (timerRef.current) clearInterval(timerRef.current);
     currentStepRef.current = 0;
-    nextStepTimeRef.current = ctx.currentTime + 0.05;
+    nextStepTimeRef.current = startAt ?? (ctx.currentTime + 0.05);
     setCurrentStep(0);
     setPlaying(true);
     timerRef.current = setInterval(scheduler, 25);
-  }, [audioCtxRef, setupAudio, scheduler]);
+  }, [audioCtxRef, scheduler]);
 
   const stopSequencer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -1059,6 +1417,11 @@ function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
     if (timerRef.current) clearInterval(timerRef.current);
   }, []);
 
+  useEffect(() => {
+    if (syncPlaying) startSequencerAt(syncStartAt);
+    else stopSequencer();
+  }, [syncPlaying, syncStartAt, syncEpoch, startSequencerAt, stopSequencer]);
+
   const toggleStep = (sound, idx) => {
     setSteps(prev => {
       const next = { ...prev };
@@ -1069,15 +1432,12 @@ function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
   };
 
   const loadPattern = (pattern) => {
-    const wasPlaying = playing;
-    if (wasPlaying) stopSequencer();
     setSteps({
       po:  [...pattern.steps.po],
       pi:  [...pattern.steps.pi],
       sha: [...pattern.steps.sha],
     });
     setTempo(pattern.tempo);
-    if (wasPlaying) setTimeout(() => startSequencer(), 50);
   };
 
   const clearPattern = () => {
@@ -1091,7 +1451,7 @@ function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
   const preview = async (type) => {
     if (!audioCtxRef.current) await setupAudio();
     else if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume();
-    triggerSound(type, audioCtxRef.current.currentTime);
+    triggerSound(type, audioCtxRef.current.currentTime, padVolume);
   };
 
   const updateParam = (sound, key, val) => {
@@ -1125,12 +1485,9 @@ function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
   };
 
   const loadDrumPreset = (p) => {
-    const wasPlaying = playing;
-    if (wasPlaying) stopSequencer();
     setSteps({ po: [...p.steps.po], pi: [...p.steps.pi], sha: [...p.steps.sha] });
     setTempo(p.tempo);
     if (p.drumParams) setDrumParams(JSON.parse(JSON.stringify(p.drumParams)));
-    if (wasPlaying) setTimeout(() => startSequencer(), 50);
   };
 
   const deleteDrumPreset = (name) => {
@@ -1163,7 +1520,7 @@ function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
       <Section title="VL-Tone Drum Machine" icon="🥁">
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
           <button
-            onClick={playing ? stopSequencer : startSequencer}
+            onClick={onToggleSync}
             style={{
               ...btnPrimary,
               background: playing
@@ -1181,7 +1538,7 @@ function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase" }}>BPM</span>
             <input
-              type="range" min={60} max={200} step={1} value={tempo}
+              type="range" min={60} max={240} step={1} value={tempo}
               onChange={(e) => setTempo(Number(e.target.value))}
               style={{ width: 120, cursor: "pointer", accentColor: T.accent }}
             />
@@ -1206,6 +1563,21 @@ function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
               textShadow: "0 0 8px rgba(51,255,102,0.5)", minWidth: 28,
             }}>
               {Math.round(drumVolume * 100)}
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase" }}>PAD</span>
+            <input
+              type="range" min={0} max={1} step={0.01} value={padVolume}
+              onChange={(e) => setPadVolume(Number(e.target.value))}
+              style={{ width: 80, cursor: "pointer", accentColor: T.accent }}
+            />
+            <span style={{
+              fontSize: 14, fontVariantNumeric: "tabular-nums", color: T.green,
+              fontWeight: 700, fontFamily: "'VT323', 'Courier New', monospace",
+              textShadow: "0 0 8px rgba(51,255,102,0.5)", minWidth: 28,
+            }}>
+              {Math.round(padVolume * 100)}
             </span>
           </div>
         </div>
@@ -1447,7 +1819,7 @@ function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
       </Section>
     </div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════════════
 //  PO-32 TONIC DRUM MACHINE
@@ -1722,19 +2094,41 @@ function triggerPO32Sound(ctx, dest, time, soundId, params, noiseBuf) {
   }
 }
 
-function PO32Tonic({ audioCtxRef, gainRef, setupAudio }) {
+const PO32Tonic = React.forwardRef(function PO32Tonic({ audioCtxRef, gainRef, setupAudio, tempo: sharedTempo, onTempoChange, syncPlaying, syncStartAt, syncEpoch, onToggleSync }, ref) {
   const emptyGrid = () => Array.from({ length: 16 }, () => Array(16).fill(0));
   const [grid, setGrid] = useState(emptyGrid);
   const [accents, setAccents] = useState(() => Array(16).fill(0));
   const [selectedSound, setSelectedSound] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [currentStep, setCurrentStep] = useState(-1);
-  const [tempo, setTempo] = useState(120);
+  const [localTempo, setLocalTempo] = useState(120);
+  const tempo = sharedTempo ?? localTempo;
+  const setTempo = onTempoChange ?? setLocalTempo;
   const [swing, setSwing] = useState(0);
   const [soundParams, setSoundParams] = useState(() =>
     Array.from({ length: 16 }, () => ({ pitch: 1.0, morph: 0.5 }))
   );
   const [mutedChannels, setMutedChannels] = useState([false, false, false, false]);
+
+  React.useImperativeHandle(ref, () => ({
+    getState: () => ({
+      grid: grid.map(r => [...r]),
+      accents: [...accents],
+      swing,
+      soundParams: JSON.parse(JSON.stringify(soundParams)),
+      mutedChannels: [...mutedChannels],
+      po32Volume, padVolume,
+    }),
+    loadState: (s) => {
+      if (s.grid) setGrid(s.grid.map(r => [...r]));
+      if (s.accents) setAccents([...s.accents]);
+      if (s.swing != null) setSwing(s.swing);
+      if (s.soundParams) setSoundParams(JSON.parse(JSON.stringify(s.soundParams)));
+      if (s.mutedChannels) setMutedChannels([...s.mutedChannels]);
+      if (s.po32Volume != null) setPo32Volume(s.po32Volume);
+      if (s.padVolume != null) setPadVolume(s.padVolume);
+    },
+  }));
 
   const gridRef = useRef(grid);       gridRef.current = grid;
   const accentsRef = useRef(accents);  accentsRef.current = accents;
@@ -1749,6 +2143,7 @@ function PO32Tonic({ audioCtxRef, gainRef, setupAudio }) {
   const po32GainRef = useRef(null);
   const stepCountRef = useRef(0);
   const [po32Volume, setPo32Volume] = useState(0.8);
+  const [padVolume, setPadVolume] = useState(0.85);
 
   useEffect(() => {
     if (po32GainRef.current) po32GainRef.current.gain.value = po32Volume;
@@ -1777,7 +2172,7 @@ function PO32Tonic({ audioCtxRef, gainRef, setupAudio }) {
     return g;
   }, [audioCtxRef, gainRef]);
 
-  const triggerSound = useCallback((soundId, time, accent) => {
+  const triggerSound = useCallback((soundId, time, accent, level = 1) => {
     const ctx = audioCtxRef.current;
     const dest = getDest();
     if (!ctx || !dest) return;
@@ -1786,7 +2181,7 @@ function PO32Tonic({ audioCtxRef, gainRef, setupAudio }) {
     const p = soundParamsRef.current[soundId];
     // Create a per-hit gain to apply accent
     const hitGain = ctx.createGain();
-    hitGain.gain.value = accent ? 1.3 : 0.8;
+    hitGain.gain.value = (accent ? 1.3 : 0.8) * level;
     hitGain.connect(dest);
     triggerPO32Sound(ctx, hitGain, time, soundId, p, ensureNoiseBuf());
   }, [audioCtxRef, getDest, ensureNoiseBuf]);
@@ -1816,17 +2211,17 @@ function PO32Tonic({ audioCtxRef, gainRef, setupAudio }) {
     }
   }, [audioCtxRef, triggerSound]);
 
-  const startSequencer = useCallback(async () => {
-    if (!audioCtxRef.current) await setupAudio();
-    else if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume();
+  const startSequencerAt = useCallback((startAt) => {
     const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    if (timerRef.current) clearInterval(timerRef.current);
     currentStepRef.current = 0;
     stepCountRef.current = 0;
-    nextStepTimeRef.current = ctx.currentTime + 0.05;
+    nextStepTimeRef.current = startAt ?? (ctx.currentTime + 0.05);
     setCurrentStep(0);
     setPlaying(true);
     timerRef.current = setInterval(scheduler, 25);
-  }, [audioCtxRef, setupAudio, scheduler]);
+  }, [audioCtxRef, scheduler]);
 
   const stopSequencer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -1837,6 +2232,11 @@ function PO32Tonic({ audioCtxRef, gainRef, setupAudio }) {
   }, []);
 
   useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
+
+  useEffect(() => {
+    if (syncPlaying) startSequencerAt(syncStartAt);
+    else stopSequencer();
+  }, [syncPlaying, syncStartAt, syncEpoch, startSequencerAt, stopSequencer]);
 
   const toggleStep = (sound, idx) => {
     setGrid(prev => {
@@ -1870,7 +2270,7 @@ function PO32Tonic({ audioCtxRef, gainRef, setupAudio }) {
   const preview = async (soundId) => {
     if (!audioCtxRef.current) await setupAudio();
     else if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume();
-    triggerSound(soundId, audioCtxRef.current.currentTime, false);
+    triggerSound(soundId, audioCtxRef.current.currentTime, false, padVolume);
   };
 
   const updateSoundParam = (soundId, key, val) => {
@@ -1903,14 +2303,11 @@ function PO32Tonic({ audioCtxRef, gainRef, setupAudio }) {
   };
 
   const loadPo32Preset = (p) => {
-    const wasPlaying = playing;
-    if (wasPlaying) stopSequencer();
     setGrid(p.grid.map(r => [...r]));
     setAccents([...p.accents]);
     setTempo(p.tempo);
     if (p.swing != null) setSwing(p.swing);
     if (p.soundParams) setSoundParams(JSON.parse(JSON.stringify(p.soundParams)));
-    if (wasPlaying) setTimeout(() => startSequencer(), 50);
   };
 
   const deletePo32Preset = (name) => {
@@ -1945,7 +2342,7 @@ function PO32Tonic({ audioCtxRef, gainRef, setupAudio }) {
         {/* Transport */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
           <button
-            onClick={playing ? stopSequencer : startSequencer}
+            onClick={onToggleSync}
             style={{
               ...btnPrimary,
               background: playing ? `linear-gradient(180deg, ${T.red}, #881a00)` : "linear-gradient(180deg, #cc6e08, #a05500)",
@@ -1982,6 +2379,11 @@ function PO32Tonic({ audioCtxRef, gainRef, setupAudio }) {
             <span style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase" }}>VOL</span>
             <input type="range" min={0} max={1} step={0.01} value={po32Volume} onChange={(e) => setPo32Volume(Number(e.target.value))} style={{ width: 80, cursor: "pointer", accentColor: T.accent }} />
             <span style={{ fontSize: 14, fontVariantNumeric: "tabular-nums", color: T.green, fontWeight: 700, fontFamily: "'VT323', 'Courier New', monospace", textShadow: "0 0 8px rgba(51,255,102,0.5)", minWidth: 28 }}>{Math.round(po32Volume * 100)}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase" }}>PAD</span>
+            <input type="range" min={0} max={1} step={0.01} value={padVolume} onChange={(e) => setPadVolume(Number(e.target.value))} style={{ width: 80, cursor: "pointer", accentColor: T.accent }} />
+            <span style={{ fontSize: 14, fontVariantNumeric: "tabular-nums", color: T.green, fontWeight: 700, fontFamily: "'VT323', 'Courier New', monospace", textShadow: "0 0 8px rgba(51,255,102,0.5)", minWidth: 28 }}>{Math.round(padVolume * 100)}</span>
           </div>
         </div>
 
@@ -2227,13 +2629,19 @@ function PO32Tonic({ audioCtxRef, gainRef, setupAudio }) {
       </Section>
     </div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════════════
 //  MAIN APP
 // ═══════════════════════════════════════════════════════════════════
 export default function GraphingCalculatorSynthApp() {
   const [page, setPage] = useState("synth"); // "synth" | "draw" | "drums"
+  const [drumBpm, setDrumBpm] = useState(120);
+  const [drumsPlaying, setDrumsPlaying] = useState(false);
+  const [drumSyncStartAt, setDrumSyncStartAt] = useState(0);
+  const [drumSyncEpoch, setDrumSyncEpoch] = useState(0);
+  const drumMachineRef = useRef(null);
+  const po32Ref = useRef(null);
   const [equationInput, setEquationInput] = useState(DEFAULT_EQ);
   const [equation, setEquation] = useState(DEFAULT_EQ);
   const [xScale, setXScale] = useState(1);
@@ -2243,19 +2651,14 @@ export default function GraphingCalculatorSynthApp() {
   const [c, setC] = useState(0);
   const [d, setD] = useState(0);
   const [openEffect, setOpenEffect] = useState(null);
-  const [fxParams, setFxParams] = useState({
-    distortion: { enabled: false, drive: 5, tone: 0.5 },
-    chorus:     { enabled: false, mix: 0.5, rate: 1.5, depth: 0.005 },
-    delay:      { enabled: false, mix: 0.3, time: 0.35, feedback: 0.4 },
-    reverb:     { enabled: false, mix: 0.3, decay: 2.0 },
-  });
+  const [fxParams, setFxParams] = useState(() => withFxDefaults());
   const [audioReady, setAudioReady] = useState(false);
   const [midiStatus, setMidiStatus] = useState("No MIDI connected");
   const [activeNotes, setActiveNotes] = useState([]);
   const [masterVolume, setMasterVolume] = useState(0.18);
   const [sampleRate, setSampleRate] = useState(44100);
-  const [adsr, setAdsr] = useState({ attack: 0.012, decay: 0.18, sustain: 0.78, release: 0.22 });
-  const [filter, setFilter] = useState({ type: "allpass", cutoff: 18000, resonance: 0.7 });
+  const [adsr, setAdsr] = useState({ ...DEFAULT_ADSR });
+  const [filter, setFilter] = useState({ ...DEFAULT_FILTER });
   const [add7th, setAdd7th] = useState(false);
 
   // ── Auth & Cloud Presets ──────────────────────────────────────────
@@ -2329,8 +2732,9 @@ export default function GraphingCalculatorSynthApp() {
     if (!authToken || !name) return;
     const data = {
       eq: equationInput, a, b, c, d, xScale, yScale, masterVolume,
-      adsr: { ...adsr }, filter: { ...filter },
-      fxParams: JSON.parse(JSON.stringify(fxParams)),
+      adsr: { ...DEFAULT_ADSR, ...adsr },
+      filter: { ...DEFAULT_FILTER, ...filter },
+      fxParams: withFxDefaults(fxParams),
       add7th, lfos: JSON.parse(JSON.stringify(lfos)),
       drawnWave: drawnWaveRef.current ? Array.from(drawnWaveRef.current) : null,
     };
@@ -2367,6 +2771,7 @@ export default function GraphingCalculatorSynthApp() {
   const lfoSHRef = useRef([0, 0, 0]); // sample & hold values
   const lfoOutputRef = useRef([0, 0, 0]); // current LFO output for display
   const lfoBaseRef = useRef({ a: 1, b: 0, c: 0, d: 0, cutoff: 18000, resonance: 0.7, volume: 0.18 });
+  const [lfoUiTick, setLfoUiTick] = useState(0);
 
   const updateLfo = (idx, key, val) => {
     setLfos((prev) => {
@@ -2375,6 +2780,51 @@ export default function GraphingCalculatorSynthApp() {
       return next;
     });
   };
+
+  // Drive knob animation in React UI so LFO movement is visible on dials.
+  useEffect(() => {
+    let raf = 0;
+    let last = 0;
+    const tick = (ts) => {
+      raf = requestAnimationFrame(tick);
+      if (ts - last < 33) return; // ~30fps UI updates
+      last = ts;
+      const active = lfosRef.current.some((l) => l.enabled && l.depth !== 0);
+      if (active) setLfoUiTick((n) => (n + 1) % 1000000);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const lfoUiMod = useCallback((target) => {
+    let mod = 0;
+    for (let i = 0; i < lfosRef.current.length; i++) {
+      const l = lfosRef.current[i];
+      if (!l.enabled || l.depth === 0 || l.target !== target) continue;
+      mod += (lfoOutputRef.current[i] || 0) * l.depth;
+    }
+    return mod;
+  }, []);
+
+  const lfoDisplay = useMemo(() => {
+    const modA = lfoUiMod("a");
+    const modB = lfoUiMod("b");
+    const modC = lfoUiMod("c");
+    const modD = lfoUiMod("d");
+    const modCutoff = lfoUiMod("cutoff");
+    const modReso = lfoUiMod("resonance");
+    const modVol = lfoUiMod("volume");
+    return {
+      a: modA,
+      b: modB,
+      c: modC,
+      d: modD,
+      // For cutoff, convert the bipolar LFO to an additive offset in Hz
+      cutoff: filter.cutoff * (Math.pow(2, modCutoff * 2) - 1),
+      resonance: modReso * 10,
+      volume: modVol * 0.3,
+    };
+  }, [a, b, c, d, filter.cutoff, filter.resonance, masterVolume, lfoUiTick, lfoUiMod]);
 
   // ── User Presets (localStorage) ──────────────────────────────────
   const [userPresets, setUserPresets] = useState(() => {
@@ -2391,9 +2841,9 @@ export default function GraphingCalculatorSynthApp() {
       a, b, c, d,
       xScale, yScale,
       masterVolume,
-      adsr: { ...adsr },
-      filter: { ...filter },
-      fxParams: JSON.parse(JSON.stringify(fxParams)),
+      adsr: { ...DEFAULT_ADSR, ...adsr },
+      filter: { ...DEFAULT_FILTER, ...filter },
+      fxParams: withFxDefaults(fxParams),
       add7th,
       lfos: JSON.parse(JSON.stringify(lfos)),
       drawnWave: drawnWaveRef.current ? Array.from(drawnWaveRef.current) : null,
@@ -2419,9 +2869,9 @@ export default function GraphingCalculatorSynthApp() {
     if (p.xScale != null) setXScale(p.xScale);
     if (p.yScale != null) setYScale(p.yScale);
     if (p.masterVolume != null) setMasterVolume(p.masterVolume);
-    if (p.adsr) setAdsr(p.adsr);
-    if (p.filter) setFilter(p.filter);
-    if (p.fxParams) setFxParams(p.fxParams);
+    setAdsr({ ...DEFAULT_ADSR, ...(p.adsr || {}) });
+    setFilter({ ...DEFAULT_FILTER, ...(p.filter || {}) });
+    setFxParams(withFxDefaults(p.fxParams || {}));
     if (p.add7th != null) setAdd7th(p.add7th);
     if (p.lfos) setLfos(p.lfos);
   };
@@ -2489,7 +2939,7 @@ export default function GraphingCalculatorSynthApp() {
   adsrRef.current = adsr;
 
   const buildSampleRef = useRef(null);
-  buildSampleRef.current = (t, freq, velocity, note) => {
+  buildSampleRef.current = (t, freq, velocity, note, smoothed) => {
     try {
       const { x: xs, y: ys } = scaleRef.current;
       const x = t * freq * 2 * Math.PI * xs;
@@ -2504,7 +2954,7 @@ export default function GraphingCalculatorSynthApp() {
         const raw = dw[i0] * (1 - frac) + dw[i1] * frac;
         return Math.tanh(raw * ys);
       }
-      const { a: pa, b: pb, c: pc, d: pd } = paramsRef.current;
+      const { a: pa, b: pb, c: pc, d: pd } = smoothed || paramsRef.current;
       const eq = compiledEqRef.current;
       if (!eq) return 0;
       const raw = eq.evaluate({
@@ -2535,7 +2985,7 @@ export default function GraphingCalculatorSynthApp() {
     analyser.connect(ctx.destination);
     analyserRef.current = analyser;
 
-    // ── Effects chain (reverse order: reverb → delay → chorus → distortion) ──
+    // ── Effects chain (reverse order: reverb → delay → chorus → squelch → distortion) ──
     const reverbDry = ctx.createGain();  reverbDry.gain.value = 1;
     const reverbWet = ctx.createGain();  reverbWet.gain.value = 0;
     const convolver = ctx.createConvolver();
@@ -2574,20 +3024,52 @@ export default function GraphingCalculatorSynthApp() {
 
     const distNode = ctx.createWaveShaper();
     distNode.oversample = "4x";
+    const distDry = ctx.createGain();
+    const distWet = ctx.createGain();
+    distDry.gain.value = 1;
+    distWet.gain.value = 0;
     const distFilter = ctx.createBiquadFilter();
     distFilter.type = "lowpass";
     distFilter.frequency.value = 20000;
+
+    const squelchDry = ctx.createGain();
+    const squelchWet = ctx.createGain();
+    squelchDry.gain.value = 1;
+    squelchWet.gain.value = 0;
+    const squelchFilter = ctx.createBiquadFilter();
+    squelchFilter.type = "lowpass";
+    squelchFilter.frequency.value = 850;
+    squelchFilter.Q.value = 14;
+    const squelchLfo = ctx.createOscillator();
+    squelchLfo.type = "triangle";
+    squelchLfo.frequency.value = 2.4;
+    const squelchDepth = ctx.createGain();
+    squelchDepth.gain.value = 0;
+    squelchLfo.connect(squelchDepth);
+    squelchDepth.connect(squelchFilter.frequency);
+    squelchLfo.start();
+
     const voiceFilter = ctx.createBiquadFilter();
     voiceFilter.type = "allpass";
     voiceFilter.frequency.value = 18000;
     voiceFilter.Q.value = 0.7;
     const distIn = ctx.createGain();
+    const squelchIn = ctx.createGain();
+    distIn.connect(distDry);
     distIn.connect(distNode);
     distNode.connect(distFilter);
-    distFilter.connect(chorusIn);
+    distFilter.connect(distWet);
+    distDry.connect(squelchIn);
+    distWet.connect(squelchIn);
+    squelchIn.connect(squelchDry);
+    squelchIn.connect(squelchFilter);
+    squelchFilter.connect(squelchWet);
+    squelchDry.connect(chorusIn);
+    squelchWet.connect(chorusIn);
 
     fxNodesRef.current = {
-      distortion: { node: distNode, filter: distFilter },
+      distortion: { node: distNode, filter: distFilter, dry: distDry, wet: distWet },
+      squelch:    { dry: squelchDry, wet: squelchWet, filter: squelchFilter, lfo: squelchLfo, depth: squelchDepth },
       chorus:     { dry: chorusDry, wet: chorusWet, lfo: chorusLfo, depth: chorusDepth, dl: chorusDl },
       delay:      { dry: delayDry, wet: delayWet, node: delayNode, fb: delayFb },
       reverb:     { dry: reverbDry, wet: reverbWet, conv: convolver },
@@ -2595,10 +3077,20 @@ export default function GraphingCalculatorSynthApp() {
     filterNodeRef.current = voiceFilter;
 
     const processor = ctx.createScriptProcessor(2048, 0, 1);
+    // Smooth param interpolation to prevent LFO-induced clicks
+    const smoothParams = { a: 1, b: 0, c: 0, d: 0 };
+    const paramSmooth = 0.999; // per-sample exponential smoothing coefficient (~20ms at 48kHz)
     processor.onaudioprocess = (ev) => {
       const out = ev.outputBuffer.getChannelData(0);
       const notes = Array.from(heldNotesRef.current.entries());
       for (let i = 0; i < out.length; i++) {
+        // Read target params per-sample so LFO changes are tracked smoothly
+        const targetParams = paramsRef.current;
+        // Per-sample exponential smoothing of equation params
+        smoothParams.a += (targetParams.a - smoothParams.a) * (1 - paramSmooth);
+        smoothParams.b += (targetParams.b - smoothParams.b) * (1 - paramSmooth);
+        smoothParams.c += (targetParams.c - smoothParams.c) * (1 - paramSmooth);
+        smoothParams.d += (targetParams.d - smoothParams.d) * (1 - paramSmooth);
         if (!notes.length) { out[i] = 0; continue; }
         let mix = 0;
         for (const [, ns] of notes) {
@@ -2618,7 +3110,7 @@ export default function GraphingCalculatorSynthApp() {
           }
           if (ns.envGain <= 0 && ns.stage === "release") continue;
           const p = phaseRef.current.get(ns.note) || 0;
-          mix += buildSampleRef.current(p / ctx.sampleRate, ns.freq, ns.velocity, ns.note) * 0.28 * ns.envGain * ns.velocity;
+          mix += buildSampleRef.current(p / ctx.sampleRate, ns.freq, ns.velocity, ns.note, smoothParams) * 0.28 * ns.envGain * ns.velocity;
           phaseRef.current.set(ns.note, p + 1);
         }
         out[i] = clamp(mix, -1, 1);
@@ -2698,18 +3190,41 @@ export default function GraphingCalculatorSynthApp() {
   useEffect(() => {
     const fx = fxNodesRef.current;
     if (!fx) return;
+    const ctx = audioCtxRef.current;
     const dp = fxParams.distortion;
     if (dp.enabled) {
-      const k = dp.drive;
+      const k = clamp(dp.drive, 1, 30);
       const n = 256;
       const curve = new Float32Array(n);
-      for (let i = 0; i < n; i++) { const x = (i * 2) / n - 1; curve[i] = Math.tanh(k * x); }
+      for (let i = 0; i < n; i++) {
+        const x = (i * 2) / n - 1;
+        const xs = clamp(x + (dp.asym || 0) * (x * x - 0.33), -1.2, 1.2);
+        const soft = Math.tanh(k * xs);
+        const hard = (2 / Math.PI) * Math.atan((k * 1.8) * xs);
+        curve[i] = clamp(soft * 0.72 + hard * 0.28, -1, 1);
+      }
       fx.distortion.node.curve = curve;
-      fx.distortion.filter.frequency.value = 500 + dp.tone * 19500;
+      fx.distortion.filter.frequency.value = 350 + dp.tone * 18000;
+      fx.distortion.wet.gain.value = dp.mix;
+      fx.distortion.dry.gain.value = 1 - dp.mix;
     } else {
       fx.distortion.node.curve = null;
       fx.distortion.filter.frequency.value = 20000;
+      fx.distortion.wet.gain.value = 0;
+      fx.distortion.dry.gain.value = 1;
     }
+    const sp = fxParams.squelch;
+    fx.squelch.wet.gain.value = sp.enabled ? sp.mix : 0;
+    fx.squelch.dry.gain.value = sp.enabled ? 1 - sp.mix : 1;
+    if (ctx) {
+      fx.squelch.filter.frequency.setTargetAtTime(clamp(sp.cutoff, 120, 8000), ctx.currentTime, 0.015);
+      fx.squelch.filter.Q.setTargetAtTime(clamp(sp.resonance, 0.1, 24), ctx.currentTime, 0.015);
+    } else {
+      fx.squelch.filter.frequency.value = clamp(sp.cutoff, 120, 8000);
+      fx.squelch.filter.Q.value = clamp(sp.resonance, 0.1, 24);
+    }
+    fx.squelch.lfo.frequency.value = sp.rate;
+    fx.squelch.depth.gain.value = sp.enabled ? sp.depth * 2800 : 0;
     const cp = fxParams.chorus;
     fx.chorus.wet.gain.value = cp.enabled ? cp.mix : 0;
     fx.chorus.lfo.frequency.value = cp.rate;
@@ -2734,6 +3249,8 @@ export default function GraphingCalculatorSynthApp() {
   useEffect(() => {
     let lastTime = performance.now();
     let animId;
+    // Smoothing constant for parameter interpolation (avoids zipper noise)
+    const smoothTime = 0.03; // ~30ms exponential ramp for filter/gain
     const tick = () => {
       animId = requestAnimationFrame(tick);
       const now = performance.now();
@@ -2770,17 +3287,21 @@ export default function GraphingCalculatorSynthApp() {
         c: bases.c + mods.c,
         d: bases.d + mods.d,
       };
-      // Apply filter modulations directly to audio nodes
+      // Apply filter and gain modulations using setTargetAtTime for click-free smoothing
+      const ctx = audioCtxRef.current;
+      const t = ctx ? ctx.currentTime : 0;
       const filterNode = filterNodeRef.current;
-      if (filterNode && mods.cutoff !== 0) {
-        const modded = clamp(bases.cutoff * Math.pow(2, mods.cutoff * 2), 60, 20000);
-        filterNode.frequency.value = modded;
+      if (filterNode && ctx) {
+        if (mods.cutoff !== 0) {
+          const modded = clamp(bases.cutoff * Math.pow(2, mods.cutoff * 2), 60, 20000);
+          filterNode.frequency.setTargetAtTime(modded, t, smoothTime);
+        }
+        if (mods.resonance !== 0) {
+          filterNode.Q.setTargetAtTime(clamp(bases.resonance + mods.resonance * 10, 0.1, 20), t, smoothTime);
+        }
       }
-      if (filterNode && mods.resonance !== 0) {
-        filterNode.Q.value = clamp(bases.resonance + mods.resonance * 10, 0.1, 20);
-      }
-      if (gainRef.current && mods.volume !== 0) {
-        gainRef.current.gain.value = clamp(bases.volume + mods.volume * 0.3, 0, 0.5);
+      if (gainRef.current && ctx && mods.volume !== 0) {
+        gainRef.current.gain.setTargetAtTime(clamp(bases.volume + mods.volume * 0.3, 0, 0.5), t, smoothTime);
       }
     };
     animId = requestAnimationFrame(tick);
@@ -3074,6 +3595,12 @@ export default function GraphingCalculatorSynthApp() {
     setEquationInput(p.eq); setEquation(p.eq); lastEquationRef.current = p.eq;
     compileEquation(p.eq);
     setA(p.a); setB(p.b); setC(p.c); setD(p.d);
+    setAdsr({ ...DEFAULT_ADSR, ...(p.adsr || {}) });
+    setFilter({ ...DEFAULT_FILTER, ...(p.filter || {}) });
+    setFxParams(withFxDefaults(p.fxParams || {}));
+    if (p.lfos) setLfos(JSON.parse(JSON.stringify(p.lfos)));
+    if (p.masterVolume != null) setMasterVolume(p.masterVolume);
+    if (p.add7th != null) setAdd7th(p.add7th);
   };
   const updateFx = (effect, key, val) => {
     setFxParams((prev) => ({ ...prev, [effect]: { ...prev[effect], [key]: val } }));
@@ -3085,6 +3612,55 @@ export default function GraphingCalculatorSynthApp() {
     setEquation("[drawn wave]");
     setPage("synth");
   }, []);
+
+  const toggleDrumSync = useCallback(async () => {
+    if (drumsPlaying) {
+      setDrumsPlaying(false);
+      return;
+    }
+    if (!audioCtxRef.current) await setupAudio();
+    else if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume();
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    setDrumSyncStartAt(ctx.currentTime + 0.08);
+    setDrumSyncEpoch((n) => n + 1);
+    setDrumsPlaying(true);
+  }, [drumsPlaying, setupAudio]);
+
+  // ── Combined Drum Presets (both machines) ─────────────────────────
+  const [combinedDrumPresets, setCombinedDrumPresets] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("wavecraft_combined_drum_presets") || "[]"); } catch { return []; }
+  });
+  const [newCombinedDrumName, setNewCombinedDrumName] = useState("");
+
+  const saveCombinedDrumPreset = () => {
+    const name = newCombinedDrumName.trim();
+    if (!name) return;
+    const preset = {
+      name,
+      bpm: drumBpm,
+      vlTone: drumMachineRef.current?.getState() ?? null,
+      po32: po32Ref.current?.getState() ?? null,
+    };
+    const existing = combinedDrumPresets.findIndex(p => p.name === name);
+    const next = [...combinedDrumPresets];
+    if (existing >= 0) next[existing] = preset; else next.push(preset);
+    setCombinedDrumPresets(next);
+    localStorage.setItem("wavecraft_combined_drum_presets", JSON.stringify(next));
+    setNewCombinedDrumName("");
+  };
+
+  const loadCombinedDrumPreset = (p) => {
+    if (p.bpm != null) setDrumBpm(p.bpm);
+    if (p.vlTone && drumMachineRef.current) drumMachineRef.current.loadState(p.vlTone);
+    if (p.po32 && po32Ref.current) po32Ref.current.loadState(p.po32);
+  };
+
+  const deleteCombinedDrumPreset = (name) => {
+    const next = combinedDrumPresets.filter(p => p.name !== name);
+    setCombinedDrumPresets(next);
+    localStorage.setItem("wavecraft_combined_drum_presets", JSON.stringify(next));
+  };
 
   // ── Button styles ─────────────────────────────────────────────────
   const btnPrimary = {
@@ -3240,8 +3816,90 @@ export default function GraphingCalculatorSynthApp() {
 
       {/* ── Drum machines (always mounted for persistence) ────── */}
       <div style={{ display: page === "drums" ? "block" : "none" }}>
-        <DrumMachine audioCtxRef={audioCtxRef} gainRef={gainRef} setupAudio={setupAudio} />
-        <PO32Tonic audioCtxRef={audioCtxRef} gainRef={gainRef} setupAudio={setupAudio} />
+        <DrumMachine
+          ref={drumMachineRef}
+          audioCtxRef={audioCtxRef}
+          gainRef={gainRef}
+          setupAudio={setupAudio}
+          tempo={drumBpm}
+          onTempoChange={setDrumBpm}
+          syncPlaying={drumsPlaying}
+          syncStartAt={drumSyncStartAt}
+          syncEpoch={drumSyncEpoch}
+          onToggleSync={toggleDrumSync}
+        />
+        <PO32Tonic
+          ref={po32Ref}
+          audioCtxRef={audioCtxRef}
+          gainRef={gainRef}
+          setupAudio={setupAudio}
+          tempo={drumBpm}
+          onTempoChange={setDrumBpm}
+          syncPlaying={drumsPlaying}
+          syncStartAt={drumSyncStartAt}
+          syncEpoch={drumSyncEpoch}
+          onToggleSync={toggleDrumSync}
+        />
+
+        {/* ── Combined Drum Kit Presets ────────────────────────── */}
+        <div style={{ maxWidth: 960, margin: "0 auto", padding: "0 20px 40px" }}>
+          <Section title="Drum Kit Presets" icon="💾">
+            <div style={{ fontSize: 10, color: T.textDim, marginBottom: 8, fontFamily: T.font }}>
+              Saves both VL-Tone and PO-32 patterns, all dial settings, and BPM together.
+            </div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              <input
+                value={newCombinedDrumName}
+                onChange={(e) => setNewCombinedDrumName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveCombinedDrumPreset()}
+                placeholder="Kit preset name…"
+                style={{
+                  flex: 1, height: 36, fontSize: 13, padding: "0 10px",
+                  background: T.surface, color: T.white,
+                  border: `1px solid ${T.border}`, borderRadius: 8,
+                  outline: "none", minWidth: 0, fontFamily: T.font,
+                }}
+              />
+              <button onClick={saveCombinedDrumPreset} disabled={!newCombinedDrumName.trim()} style={{
+                ...btnPrimary, height: 34, padding: "0 14px", fontSize: 10,
+                opacity: newCombinedDrumName.trim() ? 1 : 0.4,
+                cursor: newCombinedDrumName.trim() ? "pointer" : "not-allowed",
+              }}>
+                Save Kit
+              </button>
+            </div>
+            {combinedDrumPresets.length === 0 ? (
+              <div style={{ fontSize: 12, color: T.textMuted, textAlign: "center", padding: "8px 0" }}>
+                No saved drum kit presets yet
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {combinedDrumPresets.map((p) => (
+                  <div key={p.name} style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "5px 10px", borderRadius: 2,
+                    border: `1px solid ${T.border}`,
+                    background: "linear-gradient(180deg, #2e2820, #1a1510)",
+                  }}>
+                    <button onClick={() => loadCombinedDrumPreset(p)} style={{
+                      flex: 1, background: "none", border: "none",
+                      color: T.text, fontSize: 10, fontWeight: 700,
+                      cursor: "pointer", textAlign: "left", padding: 0,
+                      fontFamily: T.font, letterSpacing: 0.8, textTransform: "uppercase",
+                    }}>
+                      {p.name}
+                    </button>
+                    <span style={{ fontSize: 9, color: T.textMuted, fontFamily: T.font }}>{p.bpm}bpm</span>
+                    <button onClick={() => deleteCombinedDrumPreset(p.name)} title="Delete" style={{
+                      background: "none", border: "none", cursor: "pointer",
+                      color: T.textMuted, fontSize: 14, padding: "0 2px", lineHeight: 1,
+                    }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+        </div>
       </div>
 
       {/* ── page content ─────────────────────────────────────────── */}
@@ -3258,7 +3916,7 @@ export default function GraphingCalculatorSynthApp() {
           {/* ── LEFT COLUMN: Plot + Equation ─────────────────────── */}
           <div>
             <Section title="Waveform Preview" icon="📈">
-              <PlotCanvas equation={equation} params={params} xScale={xScale} yScale={yScale} drawnWave={drawnWaveRef.current} />
+              <PlotCanvas equation={equation} params={params} xScale={xScale} yScale={yScale} drawnWave={drawnWaveRef.current} lfoParams={lfoDisplay} />
 
               {/* equation input */}
               <div style={{ display: "flex", gap: 0, marginTop: 14 }}>
@@ -3433,7 +4091,7 @@ export default function GraphingCalculatorSynthApp() {
                   ■ Panic
                 </button>
               </div>
-              <Knob label="Master Volume" value={masterVolume} onChange={setMasterVolume} min={0} max={0.5} step={0.001} defaultValue={0.18} />
+              <Knob label="Master Volume" value={masterVolume} onChange={setMasterVolume} min={0} max={0.5} step={0.001} defaultValue={0.18} lfoMod={lfoDisplay.volume} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
                 <Pill>{sampleRate.toLocaleString()} Hz</Pill>
                 {activeNotes.length > 0 && (
@@ -3445,7 +4103,7 @@ export default function GraphingCalculatorSynthApp() {
             </Section>
 
             {/* keyboard */}
-            <Section title="Keyboard" icon="🎹" style={{ flex: 1 }}>
+            <Section title="Keyboard" icon="🎹">
               <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
                 <button
                   onClick={() => setAdd7th((v) => !v)}
@@ -3463,10 +4121,22 @@ export default function GraphingCalculatorSynthApp() {
                 </button>
               </div>
               <PianoKeyboard activeNotes={activeNotes} onNoteOn={wrappedNoteOn} onNoteOff={wrappedNoteOff} />
-              <div style={{ fontSize: 9, color: T.textMuted, marginTop: 10, textAlign: "center", fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase" }}>
+              <div style={{ fontSize: 9, color: T.textMuted, marginTop: 6, textAlign: "center", fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase" }}>
                 C3 — C5 · Click or use MIDI
               </div>
             </Section>
+
+            {/* Visualizations */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4, paddingLeft: 2 }}>Oscilloscope</div>
+                <Oscilloscope analyserRef={analyserRef} heldNotesRef={heldNotesRef} audioCtxRef={audioCtxRef} />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4, paddingLeft: 2 }}>Spectrum</div>
+                <Spectrum analyserRef={analyserRef} />
+              </div>
+            </div>
 
             {/* Recorder / Looper */}
             <Section title="Recorder" icon="⏺">
@@ -3698,8 +4368,17 @@ export default function GraphingCalculatorSynthApp() {
             <Section title="Effects Chain" icon="✨">
               {[
                 { id: "distortion", label: "Distortion", icon: "🔥", knobs: [
-                  { key: "drive", label: "Drive", min: 1, max: 20, step: 0.1 },
+                  { key: "drive", label: "Drive", min: 1, max: 30, step: 0.1 },
                   { key: "tone",  label: "Tone",  min: 0, max: 1,  step: 0.01 },
+                  { key: "mix",   label: "Mix",   min: 0, max: 1,  step: 0.01 },
+                  { key: "asym",  label: "Asym",  min: 0, max: 0.6, step: 0.01 },
+                ]},
+                { id: "squelch", label: "Squelch", icon: "🫧", knobs: [
+                  { key: "mix",       label: "Mix",       min: 0, max: 1, step: 0.01 },
+                  { key: "cutoff",    label: "Cutoff",    min: 120, max: 8000, step: 1 },
+                  { key: "resonance", label: "Reso",      min: 0.1, max: 24, step: 0.1 },
+                  { key: "rate",      label: "Rate",      min: 0.1, max: 12, step: 0.1 },
+                  { key: "depth",     label: "Depth",     min: 0, max: 1, step: 0.01 },
                 ]},
                 { id: "chorus", label: "Chorus", icon: "🌊", knobs: [
                   { key: "mix",   label: "Mix",   min: 0, max: 1,    step: 0.01 },
@@ -3781,29 +4460,19 @@ export default function GraphingCalculatorSynthApp() {
               })}
             </Section>
 
-            {/* Visualizations */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4, paddingLeft: 2 }}>Oscilloscope</div>
-                <Oscilloscope analyserRef={analyserRef} heldNotesRef={heldNotesRef} audioCtxRef={audioCtxRef} />
-              </div>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4, paddingLeft: 2 }}>Spectrum</div>
-                <Spectrum analyserRef={analyserRef} />
-              </div>
-            </div>
           </div>
 
           {/* ── RIGHT COLUMN: Parameters ─────────────────────────── */}
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Section title="Parameters" icon="🎛">
-              <Knob label="a" value={a} onChange={setA} defaultValue={1} />
-              <Knob label="b" value={b} onChange={setB} defaultValue={0} />
-              <Knob label="c" value={c} onChange={setC} defaultValue={0} />
-              <Knob label="d" value={d} onChange={setD} defaultValue={0} />
+              <Knob label="a" value={a} onChange={setA} defaultValue={1} lfoMod={lfoDisplay.a} />
+              <Knob label="b" value={b} onChange={setB} defaultValue={0} lfoMod={lfoDisplay.b} />
+              <Knob label="c" value={c} onChange={setC} defaultValue={0} lfoMod={lfoDisplay.c} />
+              <Knob label="d" value={d} onChange={setD} defaultValue={0} lfoMod={lfoDisplay.d} />
             </Section>
 
             <Section title="Envelope" icon="📦">
+              <AdsrGraph adsr={adsr} />
               <div style={{ display: "flex", justifyContent: "center", gap: 18, flexWrap: "wrap" }}>
                 <RotaryKnob
                   label="Attack"
@@ -3877,6 +4546,7 @@ export default function GraphingCalculatorSynthApp() {
                   max={20000}
                   step={1}
                   defaultValue={18000}
+                  lfoMod={lfoDisplay.cutoff}
                 />
                 <RotaryKnob
                   label="Reso"
@@ -3886,6 +4556,7 @@ export default function GraphingCalculatorSynthApp() {
                   max={20}
                   step={0.1}
                   defaultValue={0.7}
+                  lfoMod={lfoDisplay.resonance}
                 />
               </div>
             </Section>
@@ -3988,7 +4659,7 @@ export default function GraphingCalculatorSynthApp() {
                       </div>
                       <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
                         <RotaryKnob label="Rate" value={lfo.rate} onChange={(v) => updateLfo(i, "rate", v)}
-                          min={0.05} max={20} step={0.05} size={44} />
+                          min={0.05} max={10} step={0.05} size={44} log />
                         <RotaryKnob label="Depth" value={lfo.depth} onChange={(v) => updateLfo(i, "depth", v)}
                           min={0} max={5} step={0.01} size={44} />
                       </div>
