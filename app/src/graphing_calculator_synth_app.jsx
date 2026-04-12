@@ -788,6 +788,60 @@ export default function GraphingCalculatorSynthApp() {
   const [filter, setFilter] = useState({ type: "allpass", cutoff: 18000, resonance: 0.7 });
   const [add7th, setAdd7th] = useState(false);
 
+  // ── User Presets (localStorage) ──────────────────────────────────
+  const [userPresets, setUserPresets] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("wavecraft_presets") || "[]"); } catch { return []; }
+  });
+  const [newPresetName, setNewPresetName] = useState("");
+
+  const saveUserPreset = () => {
+    const name = newPresetName.trim();
+    if (!name) return;
+    const preset = {
+      name,
+      eq: equationInput,
+      a, b, c, d,
+      xScale, yScale,
+      masterVolume,
+      adsr: { ...adsr },
+      filter: { ...filter },
+      fxParams: JSON.parse(JSON.stringify(fxParams)),
+      add7th,
+      drawnWave: drawnWaveRef.current ? Array.from(drawnWaveRef.current) : null,
+    };
+    const existing = userPresets.findIndex((p) => p.name === name);
+    const next = [...userPresets];
+    if (existing >= 0) next[existing] = preset; else next.push(preset);
+    setUserPresets(next);
+    localStorage.setItem("wavecraft_presets", JSON.stringify(next));
+    setNewPresetName("");
+  };
+
+  const loadUserPreset = (p) => {
+    if (p.drawnWave) {
+      drawnWaveRef.current = new Float32Array(p.drawnWave);
+      setEquationInput("[drawn wave]"); setEquation("[drawn wave]");
+    } else {
+      drawnWaveRef.current = null;
+      setEquationInput(p.eq); setEquation(p.eq); lastEquationRef.current = p.eq;
+      compileEquation(p.eq);
+    }
+    setA(p.a); setB(p.b); setC(p.c); setD(p.d);
+    if (p.xScale != null) setXScale(p.xScale);
+    if (p.yScale != null) setYScale(p.yScale);
+    if (p.masterVolume != null) setMasterVolume(p.masterVolume);
+    if (p.adsr) setAdsr(p.adsr);
+    if (p.filter) setFilter(p.filter);
+    if (p.fxParams) setFxParams(p.fxParams);
+    if (p.add7th != null) setAdd7th(p.add7th);
+  };
+
+  const deleteUserPreset = (name) => {
+    const next = userPresets.filter((p) => p.name !== name);
+    setUserPresets(next);
+    localStorage.setItem("wavecraft_presets", JSON.stringify(next));
+  };
+
   // Recording / playback state
   const [recState, setRecState] = useState("idle"); // idle | countdown | recording | playing
   const [countdown, setCountdown] = useState(0);
@@ -1499,6 +1553,58 @@ export default function GraphingCalculatorSynthApp() {
                   </button>
                 ))}
               </div>
+            </Section>
+
+            {/* User Presets */}
+            <Section title="My Presets" icon="💾" style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                <input
+                  value={newPresetName}
+                  onChange={(e) => setNewPresetName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && saveUserPreset()}
+                  placeholder="Preset name…"
+                  style={{
+                    flex: 1, height: 36, fontSize: 13, padding: "0 10px",
+                    background: T.surface, color: T.white,
+                    border: `1px solid ${T.border}`, borderRadius: 8,
+                    outline: "none", minWidth: 0,
+                  }}
+                />
+                <button onClick={saveUserPreset} disabled={!newPresetName.trim()} style={{
+                  ...btnPrimary, height: 36, padding: "0 14px", fontSize: 12,
+                  opacity: newPresetName.trim() ? 1 : 0.4,
+                  cursor: newPresetName.trim() ? "pointer" : "not-allowed",
+                }}>
+                  Save
+                </button>
+              </div>
+              {userPresets.length === 0 ? (
+                <div style={{ fontSize: 12, color: T.textMuted, textAlign: "center", padding: "8px 0" }}>
+                  No saved presets yet
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {userPresets.map((p) => (
+                    <div key={p.name} style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      padding: "6px 10px", borderRadius: 8,
+                      border: `1px solid ${T.border}`, background: T.raised,
+                    }}>
+                      <button onClick={() => loadUserPreset(p)} style={{
+                        flex: 1, background: "none", border: "none",
+                        color: T.text, fontSize: 12, fontWeight: 600,
+                        cursor: "pointer", textAlign: "left", padding: 0,
+                      }}>
+                        {p.name}
+                      </button>
+                      <button onClick={() => deleteUserPreset(p.name)} title="Delete" style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        color: T.textMuted, fontSize: 14, padding: "0 2px", lineHeight: 1,
+                      }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Section>
           </div>
 
