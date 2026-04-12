@@ -897,10 +897,1343 @@ function WaveDrawer({ onUseWave }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  VL-TONE DRUM MACHINE
+// ═══════════════════════════════════════════════════════════════════
+
+const VL_PATTERNS = [
+  { name: "Rock 1", tempo: 120, steps: { po: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0], pi: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0], sha: [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0] } },
+  { name: "Rock 2", tempo: 128, steps: { po: [1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0], pi: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,1], sha: [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0] } },
+  { name: "March", tempo: 112, steps: { po: [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0], pi: [0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0], sha: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0] } },
+  { name: "Waltz", tempo: 108, steps: { po: [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], pi: [0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0], sha: [1,0,0,1,0,0,1,0,0,1,0,0,0,0,0,0] } },
+  { name: "4 Beat", tempo: 120, steps: { po: [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0], pi: [0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0], sha: [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0] } },
+  { name: "Swing", tempo: 116, steps: { po: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,1,0], pi: [0,0,0,0,1,0,0,1,0,0,0,0,1,0,0,0], sha: [1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,1] } },
+  { name: "Bossa Nova", tempo: 126, steps: { po: [1,0,0,1,0,0,1,0,0,0,1,0,0,1,0,0], pi: [0,0,1,0,0,1,0,0,1,0,0,0,1,0,0,1], sha: [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0] } },
+  { name: "Samba", tempo: 132, steps: { po: [1,0,0,1,0,0,1,0,1,0,0,1,0,0,1,0], pi: [0,0,1,0,1,0,0,0,0,0,1,0,1,0,0,1], sha: [1,1,1,0,1,1,1,0,1,1,1,0,1,1,1,0] } },
+  { name: "Beguine", tempo: 118, steps: { po: [1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0], pi: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0], sha: [1,0,1,0,0,0,1,0,1,0,1,0,0,0,1,0] } },
+  { name: "Rhumba", tempo: 110, steps: { po: [1,0,0,1,0,0,1,0,0,0,0,0,1,0,0,0], pi: [0,0,0,0,1,0,0,0,0,0,1,0,0,0,1,0], sha: [1,0,1,0,1,0,1,0,1,0,1,0,1,0,0,1] } },
+];
+
+const DRUM_SOUNDS = [
+  { id: "po", label: "Po", desc: "Bass · 30ms", color: T.accent },
+  { id: "pi", label: "Pi", desc: "Click · 20ms", color: T.green },
+  { id: "sha", label: "Sha", desc: "Noise · 160ms", color: T.amber },
+];
+
+function triggerDrumSound(ctx, dest, time, type, params, noiseBuf) {
+  if (type === "po") {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(params.pitch * 2, time);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(params.pitch, 20), time + 0.015);
+    g.gain.setValueAtTime(params.volume, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + Math.max(params.decay, 0.005));
+    osc.connect(g); g.connect(dest);
+    osc.start(time); osc.stop(time + params.decay + 0.05);
+  } else if (type === "pi") {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(params.pitch, time);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(params.pitch * 0.5, 20), time + Math.max(params.decay, 0.005));
+    g.gain.setValueAtTime(params.volume * 0.3, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + Math.max(params.decay, 0.005));
+    osc.connect(g); g.connect(dest);
+    osc.start(time); osc.stop(time + params.decay + 0.05);
+  } else if (type === "sha") {
+    if (!noiseBuf) return;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    const bpf = ctx.createBiquadFilter();
+    bpf.type = "bandpass";
+    bpf.frequency.value = params.pitch;
+    bpf.Q.value = 1.0;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(params.volume * 0.4, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + Math.max(params.decay, 0.005));
+    src.connect(bpf); bpf.connect(g); g.connect(dest);
+    src.start(time); src.stop(time + params.decay + 0.05);
+  }
+}
+
+function DrumMachine({ audioCtxRef, gainRef, setupAudio }) {
+  const [steps, setSteps] = useState({
+    po:  Array(16).fill(0),
+    pi:  Array(16).fill(0),
+    sha: Array(16).fill(0),
+  });
+  const [playing, setPlaying] = useState(false);
+  const [currentStep, setCurrentStep] = useState(-1);
+  const [tempo, setTempo] = useState(120);
+  const [drumParams, setDrumParams] = useState({
+    po:  { pitch: 150, decay: 0.03, volume: 0.8 },
+    pi:  { pitch: 1000, decay: 0.02, volume: 0.6 },
+    sha: { pitch: 6000, decay: 0.16, volume: 0.5 },
+  });
+
+  const stepsRef = useRef(steps);
+  stepsRef.current = steps;
+  const tempoRef = useRef(tempo);
+  tempoRef.current = tempo;
+  const drumParamsRef = useRef(drumParams);
+  drumParamsRef.current = drumParams;
+  const currentStepRef = useRef(-1);
+  const nextStepTimeRef = useRef(0);
+  const timerRef = useRef(null);
+  const noiseBufferRef = useRef(null);
+  const drumGainRef = useRef(null);
+  const [drumVolume, setDrumVolume] = useState(0.8);
+
+  useEffect(() => {
+    if (drumGainRef.current) drumGainRef.current.gain.value = drumVolume;
+  }, [drumVolume]);
+
+  const ensureNoiseBuf = useCallback(() => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return null;
+    if (!noiseBufferRef.current) {
+      const len = ctx.sampleRate;
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      noiseBufferRef.current = buf;
+    }
+    return noiseBufferRef.current;
+  }, [audioCtxRef]);
+
+  const getDrumDest = useCallback(() => {
+    if (drumGainRef.current) return drumGainRef.current;
+    const ctx = audioCtxRef.current;
+    if (!ctx || !gainRef.current) return null;
+    const g = ctx.createGain();
+    g.gain.value = 1.0;
+    g.connect(gainRef.current);
+    drumGainRef.current = g;
+    return g;
+  }, [audioCtxRef, gainRef]);
+
+  const triggerSound = useCallback((type, time) => {
+    const ctx = audioCtxRef.current;
+    const dest = getDrumDest();
+    if (!ctx || !dest) return;
+    triggerDrumSound(ctx, dest, time, type, drumParamsRef.current[type], ensureNoiseBuf());
+  }, [audioCtxRef, getDrumDest, ensureNoiseBuf]);
+
+  const scheduler = useCallback(() => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    while (nextStepTimeRef.current < ctx.currentTime + 0.1) {
+      const step = currentStepRef.current;
+      const s = stepsRef.current;
+      const time = nextStepTimeRef.current;
+      if (s.po[step]) triggerSound("po", time);
+      if (s.pi[step]) triggerSound("pi", time);
+      if (s.sha[step]) triggerSound("sha", time);
+      const secondsPerStep = 60.0 / tempoRef.current / 4;
+      nextStepTimeRef.current += secondsPerStep;
+      currentStepRef.current = (currentStepRef.current + 1) % 16;
+      setCurrentStep(currentStepRef.current);
+    }
+  }, [audioCtxRef, triggerSound]);
+
+  const startSequencer = useCallback(async () => {
+    if (!audioCtxRef.current) await setupAudio();
+    else if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume();
+    const ctx = audioCtxRef.current;
+    currentStepRef.current = 0;
+    nextStepTimeRef.current = ctx.currentTime + 0.05;
+    setCurrentStep(0);
+    setPlaying(true);
+    timerRef.current = setInterval(scheduler, 25);
+  }, [audioCtxRef, setupAudio, scheduler]);
+
+  const stopSequencer = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = null;
+    setPlaying(false);
+    setCurrentStep(-1);
+    currentStepRef.current = -1;
+  }, []);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+  }, []);
+
+  const toggleStep = (sound, idx) => {
+    setSteps(prev => {
+      const next = { ...prev };
+      next[sound] = [...prev[sound]];
+      next[sound][idx] = next[sound][idx] ? 0 : 1;
+      return next;
+    });
+  };
+
+  const loadPattern = (pattern) => {
+    const wasPlaying = playing;
+    if (wasPlaying) stopSequencer();
+    setSteps({
+      po:  [...pattern.steps.po],
+      pi:  [...pattern.steps.pi],
+      sha: [...pattern.steps.sha],
+    });
+    setTempo(pattern.tempo);
+    if (wasPlaying) setTimeout(() => startSequencer(), 50);
+  };
+
+  const clearPattern = () => {
+    setSteps({
+      po:  Array(16).fill(0),
+      pi:  Array(16).fill(0),
+      sha: Array(16).fill(0),
+    });
+  };
+
+  const preview = async (type) => {
+    if (!audioCtxRef.current) await setupAudio();
+    else if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume();
+    triggerSound(type, audioCtxRef.current.currentTime);
+  };
+
+  const updateParam = (sound, key, val) => {
+    setDrumParams(prev => ({
+      ...prev,
+      [sound]: { ...prev[sound], [key]: val },
+    }));
+  };
+
+  // ── Drum User Presets (localStorage) ──────────────────────────
+  const [drumPresets, setDrumPresets] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("wavecraft_drum_presets") || "[]"); } catch { return []; }
+  });
+  const [newDrumPresetName, setNewDrumPresetName] = useState("");
+
+  const saveDrumPreset = () => {
+    const name = newDrumPresetName.trim();
+    if (!name) return;
+    const preset = {
+      name,
+      steps: { po: [...steps.po], pi: [...steps.pi], sha: [...steps.sha] },
+      tempo,
+      drumParams: JSON.parse(JSON.stringify(drumParams)),
+    };
+    const existing = drumPresets.findIndex((p) => p.name === name);
+    const next = [...drumPresets];
+    if (existing >= 0) next[existing] = preset; else next.push(preset);
+    setDrumPresets(next);
+    localStorage.setItem("wavecraft_drum_presets", JSON.stringify(next));
+    setNewDrumPresetName("");
+  };
+
+  const loadDrumPreset = (p) => {
+    const wasPlaying = playing;
+    if (wasPlaying) stopSequencer();
+    setSteps({ po: [...p.steps.po], pi: [...p.steps.pi], sha: [...p.steps.sha] });
+    setTempo(p.tempo);
+    if (p.drumParams) setDrumParams(JSON.parse(JSON.stringify(p.drumParams)));
+    if (wasPlaying) setTimeout(() => startSequencer(), 50);
+  };
+
+  const deleteDrumPreset = (name) => {
+    const next = drumPresets.filter((p) => p.name !== name);
+    setDrumPresets(next);
+    localStorage.setItem("wavecraft_drum_presets", JSON.stringify(next));
+  };
+
+  const btnPrimary = {
+    display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
+    height: 38, padding: "0 18px", borderRadius: 3,
+    border: "1px solid rgba(255,180,60,0.3)",
+    background: "linear-gradient(180deg, #cc6e08 0%, #a05500 100%)",
+    color: "#f0e6d2",
+    fontSize: 12, fontWeight: 700, cursor: "pointer",
+    fontFamily: T.font, textTransform: "uppercase", letterSpacing: 1,
+    boxShadow: `0 2px 8px ${T.accentGlow}, inset 0 1px 0 rgba(255,255,255,0.1)`,
+  };
+  const btnGhost = {
+    ...btnPrimary,
+    background: "linear-gradient(180deg, #2e2820 0%, #1a1510 100%)",
+    color: T.text,
+    border: `1px solid ${T.borderHi}`,
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 4px rgba(0,0,0,0.3)",
+  };
+
+  return (
+    <div style={{ maxWidth: 960, margin: "0 auto", padding: "20px 20px 40px" }}>
+      {/* Transport & Tempo */}
+      <Section title="VL-Tone Drum Machine" icon="🥁">
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+          <button
+            onClick={playing ? stopSequencer : startSequencer}
+            style={{
+              ...btnPrimary,
+              background: playing
+                ? `linear-gradient(180deg, ${T.red}, #881a00)`
+                : "linear-gradient(180deg, #cc6e08, #a05500)",
+              boxShadow: playing
+                ? "0 2px 12px rgba(204,51,0,0.4)"
+                : `0 2px 8px ${T.accentGlow}`,
+            }}
+          >
+            {playing ? "■ Stop" : "▶ Play"}
+          </button>
+          <button onClick={clearPattern} style={btnGhost}>Clear</button>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase" }}>BPM</span>
+            <input
+              type="range" min={60} max={200} step={1} value={tempo}
+              onChange={(e) => setTempo(Number(e.target.value))}
+              style={{ width: 120, cursor: "pointer", accentColor: T.accent }}
+            />
+            <span style={{
+              fontSize: 14, fontVariantNumeric: "tabular-nums", color: T.green,
+              fontWeight: 700, fontFamily: "'VT323', 'Courier New', monospace",
+              textShadow: "0 0 8px rgba(51,255,102,0.5)", minWidth: 32,
+            }}>
+              {tempo}
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase" }}>VOL</span>
+            <input
+              type="range" min={0} max={1} step={0.01} value={drumVolume}
+              onChange={(e) => setDrumVolume(Number(e.target.value))}
+              style={{ width: 80, cursor: "pointer", accentColor: T.accent }}
+            />
+            <span style={{
+              fontSize: 14, fontVariantNumeric: "tabular-nums", color: T.green,
+              fontWeight: 700, fontFamily: "'VT323', 'Courier New', monospace",
+              textShadow: "0 0 8px rgba(51,255,102,0.5)", minWidth: 28,
+            }}>
+              {Math.round(drumVolume * 100)}
+            </span>
+          </div>
+        </div>
+
+        {/* Step Sequencer Grid */}
+        <div style={{ overflowX: "auto" }}>
+          {/* Step numbers */}
+          <div style={{ display: "flex", gap: 3, marginBottom: 4, paddingLeft: 64 }}>
+            {Array.from({ length: 16 }, (_, i) => (
+              <div key={i} style={{
+                width: 42, textAlign: "center", fontSize: 8, fontWeight: 700,
+                color: currentStep === i ? T.green : (i % 4 === 0 ? T.textDim : T.textMuted),
+                fontFamily: T.font, letterSpacing: 0.5,
+              }}>
+                {i + 1}
+              </div>
+            ))}
+          </div>
+
+          {/* Sound rows */}
+          {DRUM_SOUNDS.map((sound) => (
+            <div key={sound.id} style={{ display: "flex", alignItems: "center", gap: 3, marginBottom: 3 }}>
+              {/* Sound label + preview button */}
+              <button
+                onClick={() => preview(sound.id)}
+                title={`Preview ${sound.label}`}
+                style={{
+                  width: 60, height: 42, border: `1px solid ${T.border}`,
+                  borderRadius: T.radius, cursor: "pointer",
+                  background: "linear-gradient(180deg, #2e2820, #1a1510)",
+                  display: "flex", flexDirection: "column", alignItems: "center",
+                  justifyContent: "center", gap: 1, padding: 0,
+                }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 900, color: sound.color, fontFamily: T.font }}>
+                  {sound.label}
+                </span>
+                <span style={{ fontSize: 7, color: T.textMuted, fontFamily: T.font, letterSpacing: 0.5, textTransform: "uppercase" }}>
+                  {sound.desc}
+                </span>
+              </button>
+
+              {/* Step buttons */}
+              {steps[sound.id].map((active, i) => (
+                <div
+                  key={i}
+                  onClick={() => toggleStep(sound.id, i)}
+                  style={{
+                    width: 42, height: 42, borderRadius: T.radius,
+                    border: `1px solid ${
+                      currentStep === i ? T.green
+                      : active ? sound.color
+                      : i % 4 === 0 ? T.borderHi : T.border
+                    }`,
+                    background: active
+                      ? `linear-gradient(180deg, ${sound.color}33, ${sound.color}18)`
+                      : (i % 8 < 4 ? T.surface : T.surfaceAlt),
+                    cursor: "pointer",
+                    transition: "all 60ms",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    boxShadow: currentStep === i
+                      ? `0 0 8px ${T.greenGlow}, inset 0 0 12px ${T.greenGlow}`
+                      : active ? `inset 0 0 8px ${sound.color}22` : "none",
+                  }}
+                >
+                  {active ? (
+                    <div style={{
+                      width: 14, height: 14, borderRadius: 2,
+                      background: sound.color,
+                      boxShadow: `0 0 6px ${sound.color}88`,
+                    }} />
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {/* Playback indicator bar */}
+        {playing && (
+          <div style={{
+            marginTop: 8, height: 4, background: T.surface,
+            borderRadius: 2, border: `1px solid ${T.border}`,
+            position: "relative", overflow: "hidden",
+          }}>
+            <div style={{
+              position: "absolute",
+              left: `${(currentStep / 16) * 100}%`,
+              width: `${100 / 16}%`,
+              top: 0, bottom: 0,
+              background: T.green,
+              boxShadow: `0 0 6px ${T.greenGlow}`,
+              transition: "left 50ms",
+            }} />
+          </div>
+        )}
+      </Section>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+        {/* Rhythm Presets */}
+        <Section title="VL-1 Rhythm Presets" icon="🎵">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+            {VL_PATTERNS.map((p) => (
+              <button
+                key={p.name}
+                onClick={() => loadPattern(p)}
+                style={{
+                  padding: "8px 10px", borderRadius: 2,
+                  border: `1px solid ${T.border}`,
+                  background: "linear-gradient(180deg, #2e2820, #1a1510)",
+                  color: T.textDim,
+                  fontSize: 10, fontWeight: 700, cursor: "pointer",
+                  textAlign: "left", transition: "all 80ms",
+                  fontFamily: T.font, letterSpacing: 0.8, textTransform: "uppercase",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+                }}
+              >
+                <span style={{ color: T.text }}>{p.name}</span>
+                <span style={{ marginLeft: 6, fontSize: 9, color: T.textMuted }}>{p.tempo}bpm</span>
+              </button>
+            ))}
+          </div>
+        </Section>
+
+        {/* Sound Parameters */}
+        <Section title="Sound Controls" icon="🎛">
+          {DRUM_SOUNDS.map((sound) => {
+            const p = drumParams[sound.id];
+            return (
+              <div key={sound.id} style={{
+                marginBottom: 12, borderRadius: T.radius,
+                border: `1px solid ${T.border}`, background: T.surface,
+                padding: "10px 12px",
+              }}>
+                <div style={{
+                  fontSize: 10, fontWeight: 700, color: sound.color,
+                  fontFamily: T.font, letterSpacing: 1.5, textTransform: "uppercase",
+                  marginBottom: 8,
+                }}>
+                  {sound.label} — {sound.desc}
+                </div>
+                <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
+                  <RotaryKnob
+                    label="Pitch"
+                    value={p.pitch}
+                    onChange={(v) => updateParam(sound.id, "pitch", v)}
+                    min={sound.id === "sha" ? 1000 : 40}
+                    max={sound.id === "sha" ? 12000 : (sound.id === "pi" ? 4000 : 500)}
+                    step={sound.id === "sha" ? 100 : 1}
+                    size={44}
+                  />
+                  <RotaryKnob
+                    label="Decay"
+                    value={p.decay}
+                    onChange={(v) => updateParam(sound.id, "decay", v)}
+                    min={0.005}
+                    max={sound.id === "sha" ? 0.5 : 0.15}
+                    step={0.001}
+                    size={44}
+                  />
+                  <RotaryKnob
+                    label="Volume"
+                    value={p.volume}
+                    onChange={(v) => updateParam(sound.id, "volume", v)}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    size={44}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </Section>
+      </div>
+
+      {/* My Drum Presets */}
+      <Section title="My Drum Presets" icon="💾" style={{ marginTop: 12 }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+          <input
+            value={newDrumPresetName}
+            onChange={(e) => setNewDrumPresetName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && saveDrumPreset()}
+            placeholder="Pattern name…"
+            style={{
+              flex: 1, height: 36, fontSize: 13, padding: "0 10px",
+              background: T.surface, color: T.white,
+              border: `1px solid ${T.border}`, borderRadius: 8,
+              outline: "none", minWidth: 0, fontFamily: T.font,
+            }}
+          />
+          <button onClick={saveDrumPreset} disabled={!newDrumPresetName.trim()} style={{
+            ...btnPrimary, height: 34, padding: "0 14px", fontSize: 10,
+            opacity: newDrumPresetName.trim() ? 1 : 0.4,
+            cursor: newDrumPresetName.trim() ? "pointer" : "not-allowed",
+          }}>
+            Save
+          </button>
+        </div>
+        {drumPresets.length === 0 ? (
+          <div style={{ fontSize: 12, color: T.textMuted, textAlign: "center", padding: "8px 0" }}>
+            No saved drum presets yet
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {drumPresets.map((p) => (
+              <div key={p.name} style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "5px 10px", borderRadius: 2,
+                border: `1px solid ${T.border}`,
+                background: "linear-gradient(180deg, #2e2820, #1a1510)",
+              }}>
+                <button onClick={() => loadDrumPreset(p)} style={{
+                  flex: 1, background: "none", border: "none",
+                  color: T.text, fontSize: 10, fontWeight: 700,
+                  cursor: "pointer", textAlign: "left", padding: 0,
+                  fontFamily: T.font, letterSpacing: 0.8, textTransform: "uppercase",
+                }}>
+                  {p.name}
+                </button>
+                <span style={{ fontSize: 9, color: T.textMuted, fontFamily: T.font }}>{p.tempo}bpm</span>
+                <button onClick={() => deleteDrumPreset(p.name)} title="Delete" style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  color: T.textMuted, fontSize: 14, padding: "0 2px", lineHeight: 1,
+                }}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {/* Info */}
+      <Section title="About" icon="📖" style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 10, lineHeight: 2, color: T.textDim, fontFamily: T.font }}>
+          <div>Inspired by the <b style={{ color: T.amber }}>Casio VL-Tone VL-1</b> (1979–1984)</div>
+          <div>Three internal drum sounds: <b style={{ color: T.accent }}>Po</b> (bass, 30ms), <b style={{ color: T.green }}>Pi</b> (click, 20ms), <b style={{ color: T.amber }}>Sha</b> (noise, 160ms)</div>
+          <div>Used in 10 built-in rhythm patterns — famously heard on Trio's "Da Da Da"</div>
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  PO-32 TONIC DRUM MACHINE
+// ═══════════════════════════════════════════════════════════════════
+
+const PO32_SOUNDS = [
+  { id: 0,  name: "Kick 1",    short: "KK1", ch: 1, color: "#ff5544" },
+  { id: 1,  name: "Snare 1",   short: "SN1", ch: 1, color: "#ff8844" },
+  { id: 2,  name: "Shaker",    short: "SHK", ch: 1, color: "#ffaa33" },
+  { id: 3,  name: "Zap",       short: "ZAP", ch: 1, color: "#ffcc22" },
+  { id: 4,  name: "Kick 2",    short: "KK2", ch: 2, color: "#44ff66" },
+  { id: 5,  name: "Snare 2",   short: "SN2", ch: 2, color: "#33ddaa" },
+  { id: 6,  name: "Hi-Hat C",  short: "HHC", ch: 2, color: "#33ccdd" },
+  { id: 7,  name: "Hi-Hat O",  short: "HHO", ch: 2, color: "#44aaff" },
+  { id: 8,  name: "Low Tom",   short: "LTM", ch: 3, color: "#8866ff" },
+  { id: 9,  name: "Rimshot",   short: "RIM", ch: 3, color: "#aa55ff" },
+  { id: 10, name: "Tamb",      short: "TMB", ch: 3, color: "#cc44ee" },
+  { id: 11, name: "Clap",      short: "CLP", ch: 3, color: "#ff44cc" },
+  { id: 12, name: "Bass",      short: "BAS", ch: 4, color: "#ff4488" },
+  { id: 13, name: "FM",        short: "FM ", ch: 4, color: "#ff6666" },
+  { id: 14, name: "Synth",     short: "SYN", ch: 4, color: "#ee8844" },
+  { id: 15, name: "Noise",     short: "NOI", ch: 4, color: "#ddaa33" },
+];
+
+const PO32_TEMPO_PRESETS = [
+  { name: "Hip Hop", bpm: 80 },
+  { name: "Disco", bpm: 120 },
+  { name: "Techno", bpm: 140 },
+];
+
+function triggerPO32Sound(ctx, dest, time, soundId, params, noiseBuf) {
+  const pitch = params.pitch;
+  const morph = params.morph;
+
+  switch (soundId) {
+    case 0: case 4: { // Kick 1, Kick 2
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "sine";
+      const basePitch = soundId === 0 ? pitch * 80 : pitch * 60;
+      osc.frequency.setValueAtTime(basePitch * 3, time);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(basePitch, 20), time + 0.04 + morph * 0.06);
+      const decay = 0.15 + morph * 0.25;
+      g.gain.setValueAtTime(0.9, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + decay);
+      osc.connect(g); g.connect(dest);
+      osc.start(time); osc.stop(time + decay + 0.05);
+      // Sub click
+      const click = ctx.createOscillator();
+      const cg = ctx.createGain();
+      click.type = "sine";
+      click.frequency.value = basePitch * 1.5;
+      cg.gain.setValueAtTime(0.3, time);
+      cg.gain.exponentialRampToValueAtTime(0.001, time + 0.01);
+      click.connect(cg); cg.connect(dest);
+      click.start(time); click.stop(time + 0.05);
+      break;
+    }
+    case 1: case 5: { // Snare 1, Snare 2
+      const osc = ctx.createOscillator();
+      const og = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(pitch * 200, time);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(pitch * 120, 20), time + 0.05);
+      const decay = 0.12 + morph * 0.15;
+      og.gain.setValueAtTime(0.5, time);
+      og.gain.exponentialRampToValueAtTime(0.001, time + decay);
+      osc.connect(og); og.connect(dest);
+      osc.start(time); osc.stop(time + decay + 0.05);
+      if (noiseBuf) {
+        const ns = ctx.createBufferSource(); ns.buffer = noiseBuf;
+        const nf = ctx.createBiquadFilter(); nf.type = "highpass";
+        nf.frequency.value = soundId === 1 ? 3000 + morph * 4000 : 5000 + morph * 3000;
+        const ng = ctx.createGain();
+        ng.gain.setValueAtTime(0.6, time);
+        ng.gain.exponentialRampToValueAtTime(0.001, time + decay * 1.2);
+        ns.connect(nf); nf.connect(ng); ng.connect(dest);
+        ns.start(time); ns.stop(time + decay * 1.2 + 0.05);
+      }
+      break;
+    }
+    case 2: { // Shaker
+      if (!noiseBuf) break;
+      const ns = ctx.createBufferSource(); ns.buffer = noiseBuf;
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass";
+      bp.frequency.value = 6000 + pitch * 4000; bp.Q.value = 1 + morph * 3;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.4, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + 0.06 + morph * 0.1);
+      ns.connect(bp); bp.connect(g); g.connect(dest);
+      ns.start(time); ns.stop(time + 0.2);
+      break;
+    }
+    case 3: { // Zap
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(pitch * 2000, time);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(pitch * 100, 20), time + 0.05 + morph * 0.15);
+      g.gain.setValueAtTime(0.4, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + 0.08 + morph * 0.12);
+      osc.connect(g); g.connect(dest);
+      osc.start(time); osc.stop(time + 0.3);
+      break;
+    }
+    case 6: case 7: { // Hi-Hat Closed, Hi-Hat Open
+      if (!noiseBuf) break;
+      const ns = ctx.createBufferSource(); ns.buffer = noiseBuf;
+      const hp = ctx.createBiquadFilter(); hp.type = "highpass";
+      hp.frequency.value = 7000 + pitch * 3000;
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass";
+      bp.frequency.value = 10000; bp.Q.value = 2;
+      const g = ctx.createGain();
+      const decay = soundId === 6 ? 0.04 + morph * 0.04 : 0.15 + morph * 0.3;
+      g.gain.setValueAtTime(0.35, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + decay);
+      ns.connect(hp); hp.connect(bp); bp.connect(g); g.connect(dest);
+      ns.start(time); ns.stop(time + decay + 0.05);
+      // Metallic tone
+      const osc = ctx.createOscillator();
+      const og = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.value = 4000 + pitch * 2000;
+      og.gain.setValueAtTime(0.08, time);
+      og.gain.exponentialRampToValueAtTime(0.001, time + decay * 0.5);
+      osc.connect(og); og.connect(dest);
+      osc.start(time); osc.stop(time + decay + 0.05);
+      break;
+    }
+    case 8: { // Low Tom
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(pitch * 150, time);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(pitch * 60, 20), time + 0.1);
+      const decay = 0.2 + morph * 0.3;
+      g.gain.setValueAtTime(0.7, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + decay);
+      osc.connect(g); g.connect(dest);
+      osc.start(time); osc.stop(time + decay + 0.05);
+      break;
+    }
+    case 9: { // Rimshot
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.value = pitch * 800;
+      g.gain.setValueAtTime(0.5, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + 0.03 + morph * 0.02);
+      osc.connect(g); g.connect(dest);
+      osc.start(time); osc.stop(time + 0.1);
+      if (noiseBuf) {
+        const ns = ctx.createBufferSource(); ns.buffer = noiseBuf;
+        const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 6000;
+        const ng = ctx.createGain();
+        ng.gain.setValueAtTime(0.3, time);
+        ng.gain.exponentialRampToValueAtTime(0.001, time + 0.02);
+        ns.connect(hp); hp.connect(ng); ng.connect(dest);
+        ns.start(time); ns.stop(time + 0.08);
+      }
+      break;
+    }
+    case 10: { // Tambourine
+      if (!noiseBuf) break;
+      const ns = ctx.createBufferSource(); ns.buffer = noiseBuf;
+      const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 8000 + pitch * 2000;
+      const g = ctx.createGain();
+      const decay = 0.08 + morph * 0.15;
+      g.gain.setValueAtTime(0.35, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + decay);
+      ns.connect(hp); hp.connect(g); g.connect(dest);
+      ns.start(time); ns.stop(time + decay + 0.05);
+      const osc = ctx.createOscillator();
+      const og = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.value = 5000 + pitch * 1000;
+      og.gain.setValueAtTime(0.05, time);
+      og.gain.exponentialRampToValueAtTime(0.001, time + decay * 0.3);
+      osc.connect(og); og.connect(dest);
+      osc.start(time); osc.stop(time + decay + 0.05);
+      break;
+    }
+    case 11: { // Clap
+      if (!noiseBuf) break;
+      for (let j = 0; j < 3; j++) {
+        const ns = ctx.createBufferSource(); ns.buffer = noiseBuf;
+        const bp = ctx.createBiquadFilter(); bp.type = "bandpass";
+        bp.frequency.value = 1500 + pitch * 1500; bp.Q.value = 1;
+        const g = ctx.createGain();
+        const t = time + j * 0.012;
+        g.gain.setValueAtTime(0.4, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.02);
+        ns.connect(bp); bp.connect(g); g.connect(dest);
+        ns.start(t); ns.stop(t + 0.06);
+      }
+      const tail = ctx.createBufferSource(); tail.buffer = noiseBuf;
+      const tbp = ctx.createBiquadFilter(); tbp.type = "bandpass";
+      tbp.frequency.value = 1500 + pitch * 1500; tbp.Q.value = 1;
+      const tg = ctx.createGain();
+      const decay = 0.1 + morph * 0.2;
+      tg.gain.setValueAtTime(0.5, time + 0.04);
+      tg.gain.exponentialRampToValueAtTime(0.001, time + 0.04 + decay);
+      tail.connect(tbp); tbp.connect(tg); tg.connect(dest);
+      tail.start(time + 0.04); tail.stop(time + 0.04 + decay + 0.05);
+      break;
+    }
+    case 12: { // Bass
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = morph > 0.5 ? "sawtooth" : "sine";
+      osc.frequency.setValueAtTime(pitch * 55, time);
+      const decay = 0.2 + morph * 0.4;
+      g.gain.setValueAtTime(0.7, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + decay);
+      const lp = ctx.createBiquadFilter(); lp.type = "lowpass";
+      lp.frequency.setValueAtTime(400 + morph * 2000, time);
+      lp.frequency.exponentialRampToValueAtTime(Math.max(100, 100 + morph * 200), time + decay);
+      osc.connect(lp); lp.connect(g); g.connect(dest);
+      osc.start(time); osc.stop(time + decay + 0.05);
+      break;
+    }
+    case 13: { // FM
+      const carrier = ctx.createOscillator();
+      const mod = ctx.createOscillator();
+      const modGain = ctx.createGain();
+      const g = ctx.createGain();
+      carrier.type = "sine";
+      mod.type = "sine";
+      carrier.frequency.value = pitch * 200;
+      mod.frequency.value = pitch * 200 * (1 + morph * 6);
+      modGain.gain.setValueAtTime(pitch * 400 * morph, time);
+      modGain.gain.exponentialRampToValueAtTime(1, time + 0.15 + morph * 0.1);
+      const decay = 0.1 + morph * 0.2;
+      g.gain.setValueAtTime(0.5, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + decay);
+      mod.connect(modGain); modGain.connect(carrier.frequency);
+      carrier.connect(g); g.connect(dest);
+      mod.start(time); carrier.start(time);
+      mod.stop(time + decay + 0.1); carrier.stop(time + decay + 0.1);
+      break;
+    }
+    case 14: { // Synth
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.value = pitch * 220;
+      const lp = ctx.createBiquadFilter(); lp.type = "lowpass";
+      lp.frequency.setValueAtTime(800 + morph * 6000, time);
+      lp.frequency.exponentialRampToValueAtTime(Math.max(200, 200 + morph * 400), time + 0.15);
+      lp.Q.value = 2 + morph * 6;
+      const decay = 0.1 + morph * 0.2;
+      g.gain.setValueAtTime(0.45, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + decay);
+      osc.connect(lp); lp.connect(g); g.connect(dest);
+      osc.start(time); osc.stop(time + decay + 0.05);
+      break;
+    }
+    case 15: { // Noise
+      if (!noiseBuf) break;
+      const ns = ctx.createBufferSource(); ns.buffer = noiseBuf;
+      const lp = ctx.createBiquadFilter(); lp.type = "lowpass";
+      lp.frequency.value = 2000 + pitch * 8000;
+      const g = ctx.createGain();
+      const decay = 0.05 + morph * 0.3;
+      g.gain.setValueAtTime(0.45, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + decay);
+      ns.connect(lp); lp.connect(g); g.connect(dest);
+      ns.start(time); ns.stop(time + decay + 0.05);
+      break;
+    }
+    default: break;
+  }
+}
+
+function PO32Tonic({ audioCtxRef, gainRef, setupAudio }) {
+  const emptyGrid = () => Array.from({ length: 16 }, () => Array(16).fill(0));
+  const [grid, setGrid] = useState(emptyGrid);
+  const [accents, setAccents] = useState(() => Array(16).fill(0));
+  const [selectedSound, setSelectedSound] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [currentStep, setCurrentStep] = useState(-1);
+  const [tempo, setTempo] = useState(120);
+  const [swing, setSwing] = useState(0);
+  const [soundParams, setSoundParams] = useState(() =>
+    Array.from({ length: 16 }, () => ({ pitch: 1.0, morph: 0.5 }))
+  );
+  const [mutedChannels, setMutedChannels] = useState([false, false, false, false]);
+
+  const gridRef = useRef(grid);       gridRef.current = grid;
+  const accentsRef = useRef(accents);  accentsRef.current = accents;
+  const tempoRef = useRef(tempo);      tempoRef.current = tempo;
+  const swingRef = useRef(swing);      swingRef.current = swing;
+  const soundParamsRef = useRef(soundParams); soundParamsRef.current = soundParams;
+  const mutedRef = useRef(mutedChannels);     mutedRef.current = mutedChannels;
+  const currentStepRef = useRef(-1);
+  const nextStepTimeRef = useRef(0);
+  const timerRef = useRef(null);
+  const noiseBufferRef = useRef(null);
+  const po32GainRef = useRef(null);
+  const stepCountRef = useRef(0);
+  const [po32Volume, setPo32Volume] = useState(0.8);
+
+  useEffect(() => {
+    if (po32GainRef.current) po32GainRef.current.gain.value = po32Volume;
+  }, [po32Volume]);
+
+  const ensureNoiseBuf = useCallback(() => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return null;
+    if (!noiseBufferRef.current) {
+      const len = ctx.sampleRate;
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      noiseBufferRef.current = buf;
+    }
+    return noiseBufferRef.current;
+  }, [audioCtxRef]);
+
+  const getDest = useCallback(() => {
+    if (po32GainRef.current) return po32GainRef.current;
+    const ctx = audioCtxRef.current;
+    if (!ctx || !gainRef.current) return null;
+    const g = ctx.createGain(); g.gain.value = 1.0;
+    g.connect(gainRef.current);
+    po32GainRef.current = g;
+    return g;
+  }, [audioCtxRef, gainRef]);
+
+  const triggerSound = useCallback((soundId, time, accent) => {
+    const ctx = audioCtxRef.current;
+    const dest = getDest();
+    if (!ctx || !dest) return;
+    const ch = PO32_SOUNDS[soundId].ch;
+    if (mutedRef.current[ch - 1]) return;
+    const p = soundParamsRef.current[soundId];
+    // Create a per-hit gain to apply accent
+    const hitGain = ctx.createGain();
+    hitGain.gain.value = accent ? 1.3 : 0.8;
+    hitGain.connect(dest);
+    triggerPO32Sound(ctx, hitGain, time, soundId, p, ensureNoiseBuf());
+  }, [audioCtxRef, getDest, ensureNoiseBuf]);
+
+  const scheduler = useCallback(() => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    while (nextStepTimeRef.current < ctx.currentTime + 0.1) {
+      const step = currentStepRef.current;
+      const g = gridRef.current;
+      const acc = accentsRef.current;
+      const time = nextStepTimeRef.current;
+      for (let s = 0; s < 16; s++) {
+        if (g[s][step]) triggerSound(s, time, acc[step]);
+      }
+      // Calculate next step time with swing
+      const baseInterval = 60.0 / tempoRef.current / 4;
+      const swingAmt = swingRef.current;
+      const isEven = stepCountRef.current % 2 === 0;
+      const interval = isEven
+        ? baseInterval * (1 + swingAmt * 0.33)
+        : baseInterval * (1 - swingAmt * 0.33);
+      nextStepTimeRef.current += interval;
+      stepCountRef.current++;
+      currentStepRef.current = (currentStepRef.current + 1) % 16;
+      setCurrentStep(currentStepRef.current);
+    }
+  }, [audioCtxRef, triggerSound]);
+
+  const startSequencer = useCallback(async () => {
+    if (!audioCtxRef.current) await setupAudio();
+    else if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume();
+    const ctx = audioCtxRef.current;
+    currentStepRef.current = 0;
+    stepCountRef.current = 0;
+    nextStepTimeRef.current = ctx.currentTime + 0.05;
+    setCurrentStep(0);
+    setPlaying(true);
+    timerRef.current = setInterval(scheduler, 25);
+  }, [audioCtxRef, setupAudio, scheduler]);
+
+  const stopSequencer = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = null;
+    setPlaying(false);
+    setCurrentStep(-1);
+    currentStepRef.current = -1;
+  }, []);
+
+  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
+
+  const toggleStep = (sound, idx) => {
+    setGrid(prev => {
+      const next = prev.map(r => [...r]);
+      next[sound][idx] = next[sound][idx] ? 0 : 1;
+      return next;
+    });
+  };
+
+  const toggleAccent = (idx) => {
+    setAccents(prev => {
+      const next = [...prev];
+      next[idx] = next[idx] ? 0 : 1;
+      return next;
+    });
+  };
+
+  const toggleMute = (ch) => {
+    setMutedChannels(prev => {
+      const next = [...prev];
+      next[ch] = !next[ch];
+      return next;
+    });
+  };
+
+  const clearPattern = () => {
+    setGrid(emptyGrid());
+    setAccents(Array(16).fill(0));
+  };
+
+  const preview = async (soundId) => {
+    if (!audioCtxRef.current) await setupAudio();
+    else if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume();
+    triggerSound(soundId, audioCtxRef.current.currentTime, false);
+  };
+
+  const updateSoundParam = (soundId, key, val) => {
+    setSoundParams(prev => {
+      const next = [...prev];
+      next[soundId] = { ...next[soundId], [key]: val };
+      return next;
+    });
+  };
+
+  // ── PO-32 User Presets ──────────────────────────────────────────
+  const [po32Presets, setPo32Presets] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("wavecraft_po32_presets") || "[]"); } catch { return []; }
+  });
+  const [newPo32PresetName, setNewPo32PresetName] = useState("");
+
+  const savePo32Preset = () => {
+    const name = newPo32PresetName.trim();
+    if (!name) return;
+    const preset = {
+      name, grid: grid.map(r => [...r]), accents: [...accents],
+      tempo, swing, soundParams: JSON.parse(JSON.stringify(soundParams)),
+    };
+    const existing = po32Presets.findIndex(p => p.name === name);
+    const next = [...po32Presets];
+    if (existing >= 0) next[existing] = preset; else next.push(preset);
+    setPo32Presets(next);
+    localStorage.setItem("wavecraft_po32_presets", JSON.stringify(next));
+    setNewPo32PresetName("");
+  };
+
+  const loadPo32Preset = (p) => {
+    const wasPlaying = playing;
+    if (wasPlaying) stopSequencer();
+    setGrid(p.grid.map(r => [...r]));
+    setAccents([...p.accents]);
+    setTempo(p.tempo);
+    if (p.swing != null) setSwing(p.swing);
+    if (p.soundParams) setSoundParams(JSON.parse(JSON.stringify(p.soundParams)));
+    if (wasPlaying) setTimeout(() => startSequencer(), 50);
+  };
+
+  const deletePo32Preset = (name) => {
+    const next = po32Presets.filter(p => p.name !== name);
+    setPo32Presets(next);
+    localStorage.setItem("wavecraft_po32_presets", JSON.stringify(next));
+  };
+
+  const btnPrimary = {
+    display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
+    height: 38, padding: "0 18px", borderRadius: 3,
+    border: "1px solid rgba(255,180,60,0.3)",
+    background: "linear-gradient(180deg, #cc6e08 0%, #a05500 100%)",
+    color: "#f0e6d2",
+    fontSize: 12, fontWeight: 700, cursor: "pointer",
+    fontFamily: T.font, textTransform: "uppercase", letterSpacing: 1,
+    boxShadow: `0 2px 8px ${T.accentGlow}, inset 0 1px 0 rgba(255,255,255,0.1)`,
+  };
+  const btnGhost = {
+    ...btnPrimary,
+    background: "linear-gradient(180deg, #2e2820 0%, #1a1510 100%)",
+    color: T.text,
+    border: `1px solid ${T.borderHi}`,
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 4px rgba(0,0,0,0.3)",
+  };
+
+  const sel = PO32_SOUNDS[selectedSound];
+
+  return (
+    <div style={{ maxWidth: 960, margin: "0 auto", padding: "20px 20px 40px" }}>
+      <Section title="PO-32 Tonic" icon="🔲">
+        {/* Transport */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+          <button
+            onClick={playing ? stopSequencer : startSequencer}
+            style={{
+              ...btnPrimary,
+              background: playing ? `linear-gradient(180deg, ${T.red}, #881a00)` : "linear-gradient(180deg, #cc6e08, #a05500)",
+              boxShadow: playing ? "0 2px 12px rgba(204,51,0,0.4)" : `0 2px 8px ${T.accentGlow}`,
+            }}
+          >
+            {playing ? "■ Stop" : "▶ Play"}
+          </button>
+          <button onClick={clearPattern} style={btnGhost}>Clear</button>
+
+          {/* Tempo presets */}
+          <div style={{ display: "flex", gap: 3 }}>
+            {PO32_TEMPO_PRESETS.map(tp => (
+              <button key={tp.name} onClick={() => setTempo(tp.bpm)} style={{
+                height: 28, padding: "0 10px", fontSize: 9, fontWeight: 700,
+                fontFamily: T.font, letterSpacing: 0.8, textTransform: "uppercase",
+                border: `1px solid ${tempo === tp.bpm ? T.accent : T.border}`,
+                borderRadius: 2, cursor: "pointer",
+                background: tempo === tp.bpm ? "linear-gradient(180deg, #cc6e08, #a05500)" : "linear-gradient(180deg, #2e2820, #1a1510)",
+                color: tempo === tp.bpm ? "#f0e6d2" : T.textDim,
+              }}>
+                {tp.name}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase" }}>BPM</span>
+            <input type="range" min={60} max={240} step={1} value={tempo} onChange={(e) => setTempo(Number(e.target.value))} style={{ width: 100, cursor: "pointer", accentColor: T.accent }} />
+            <span style={{ fontSize: 14, fontVariantNumeric: "tabular-nums", color: T.green, fontWeight: 700, fontFamily: "'VT323', 'Courier New', monospace", textShadow: "0 0 8px rgba(51,255,102,0.5)", minWidth: 32 }}>{tempo}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase" }}>VOL</span>
+            <input type="range" min={0} max={1} step={0.01} value={po32Volume} onChange={(e) => setPo32Volume(Number(e.target.value))} style={{ width: 80, cursor: "pointer", accentColor: T.accent }} />
+            <span style={{ fontSize: 14, fontVariantNumeric: "tabular-nums", color: T.green, fontWeight: 700, fontFamily: "'VT323', 'Courier New', monospace", textShadow: "0 0 8px rgba(51,255,102,0.5)", minWidth: 28 }}>{Math.round(po32Volume * 100)}</span>
+          </div>
+        </div>
+
+        {/* Sound selector — 4×4 grid like the real PO-32 */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: T.textMuted, fontFamily: T.font, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>
+            Sound — {sel.name}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 3 }}>
+            {PO32_SOUNDS.map((s) => {
+              const active = grid[s.id].some(v => v);
+              return (
+                <button key={s.id} onClick={() => setSelectedSound(s.id)} style={{
+                  height: 36, border: `1px solid ${selectedSound === s.id ? s.color : active ? `${s.color}66` : T.border}`,
+                  borderRadius: T.radius, cursor: "pointer", padding: 0,
+                  background: selectedSound === s.id
+                    ? `linear-gradient(180deg, ${s.color}44, ${s.color}22)`
+                    : active ? `${s.color}11` : T.surface,
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 0,
+                  boxShadow: selectedSound === s.id ? `0 0 8px ${s.color}44` : "none",
+                }}>
+                  <span style={{ fontSize: 9, fontWeight: 900, color: selectedSound === s.id ? s.color : T.textDim, fontFamily: T.font }}>{s.short}</span>
+                  <span style={{ fontSize: 7, color: T.textMuted, fontFamily: T.font }}>{s.id + 1}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Step grid for selected sound */}
+        <div style={{ overflowX: "auto" }}>
+          {/* Step numbers */}
+          <div style={{ display: "flex", gap: 3, marginBottom: 2, paddingLeft: 2 }}>
+            {Array.from({ length: 16 }, (_, i) => (
+              <div key={i} style={{
+                flex: 1, minWidth: 38, textAlign: "center", fontSize: 8, fontWeight: 700,
+                color: currentStep === i ? T.green : (i % 4 === 0 ? T.textDim : T.textMuted),
+                fontFamily: T.font,
+              }}>
+                {i + 1}
+              </div>
+            ))}
+          </div>
+
+          {/* Selected sound steps */}
+          <div style={{ display: "flex", gap: 3, marginBottom: 4 }}>
+            {grid[selectedSound].map((active, i) => (
+              <div key={i} onClick={() => toggleStep(selectedSound, i)} style={{
+                flex: 1, minWidth: 38, height: 42, borderRadius: T.radius,
+                border: `1px solid ${
+                  currentStep === i ? T.green
+                  : active ? sel.color
+                  : i % 4 === 0 ? T.borderHi : T.border
+                }`,
+                background: active
+                  ? `linear-gradient(180deg, ${sel.color}44, ${sel.color}22)`
+                  : (i % 8 < 4 ? T.surface : T.surfaceAlt),
+                cursor: "pointer", transition: "all 60ms",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: currentStep === i ? `0 0 8px ${T.greenGlow}, inset 0 0 12px ${T.greenGlow}` : active ? `inset 0 0 8px ${sel.color}22` : "none",
+              }}>
+                {active ? <div style={{ width: 14, height: 14, borderRadius: 2, background: sel.color, boxShadow: `0 0 6px ${sel.color}88` }} /> : null}
+              </div>
+            ))}
+          </div>
+
+          {/* Accent row */}
+          <div style={{ display: "flex", gap: 3, marginBottom: 4 }}>
+            {accents.map((acc, i) => (
+              <div key={i} onClick={() => toggleAccent(i)} title="Accent" style={{
+                flex: 1, minWidth: 38, height: 18, borderRadius: 2,
+                border: `1px solid ${acc ? T.amber : T.border}`,
+                background: acc ? `${T.amber}22` : "transparent",
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 8, fontWeight: 900, color: acc ? T.amber : T.textMuted, fontFamily: T.font,
+              }}>
+                {acc ? "ACC" : "·"}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Compact overview — all 16 tracks */}
+        <div style={{ marginTop: 12, overflowX: "auto" }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: T.textMuted, fontFamily: T.font, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 4 }}>
+            Pattern Overview
+          </div>
+          {PO32_SOUNDS.map((s) => (
+            <div key={s.id}
+              onClick={() => setSelectedSound(s.id)}
+              style={{
+                display: "flex", alignItems: "center", gap: 2, marginBottom: 1,
+                cursor: "pointer", opacity: mutedRef.current[s.ch - 1] ? 0.3 : 1,
+                background: selectedSound === s.id ? `${s.color}0a` : "transparent",
+                borderRadius: 2, padding: "1px 0",
+              }}
+            >
+              <span style={{
+                width: 30, fontSize: 7, fontWeight: 700, color: selectedSound === s.id ? s.color : T.textMuted,
+                fontFamily: T.font, textAlign: "right", paddingRight: 4, flexShrink: 0,
+              }}>{s.short}</span>
+              {grid[s.id].map((active, i) => (
+                <div key={i} style={{
+                  flex: 1, minWidth: 4, height: 8, borderRadius: 1,
+                  background: active ? s.color : (currentStep === i ? `${T.green}33` : T.border),
+                  opacity: active ? 1 : 0.3,
+                }} />
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {/* Playback indicator */}
+        {playing && (
+          <div style={{
+            marginTop: 6, height: 4, background: T.surface,
+            borderRadius: 2, border: `1px solid ${T.border}`,
+            position: "relative", overflow: "hidden",
+          }}>
+            <div style={{
+              position: "absolute", left: `${(currentStep / 16) * 100}%`, width: `${100 / 16}%`,
+              top: 0, bottom: 0, background: T.green,
+              boxShadow: `0 0 6px ${T.greenGlow}`, transition: "left 50ms",
+            }} />
+          </div>
+        )}
+      </Section>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+        {/* Sound Controls */}
+        <Section title={`Sound: ${sel.name}`} icon="🎛">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <button onClick={() => preview(selectedSound)} style={{
+              ...btnGhost, height: 30, padding: "0 14px", fontSize: 10,
+            }}>
+              ▶ Preview
+            </button>
+            <div style={{ width: 12, height: 12, borderRadius: 2, background: sel.color, boxShadow: `0 0 6px ${sel.color}66` }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: sel.color, fontFamily: T.font, letterSpacing: 1 }}>{sel.name}</span>
+          </div>
+          <div style={{ display: "flex", gap: 24, justifyContent: "center" }}>
+            <RotaryKnob
+              label="A · Pitch"
+              value={soundParams[selectedSound].pitch}
+              onChange={(v) => updateSoundParam(selectedSound, "pitch", v)}
+              min={0.25} max={4} step={0.01} size={56}
+            />
+            <RotaryKnob
+              label="B · Morph"
+              value={soundParams[selectedSound].morph}
+              onChange={(v) => updateSoundParam(selectedSound, "morph", v)}
+              min={0} max={1} step={0.01} size={56}
+            />
+          </div>
+        </Section>
+
+        {/* Mixer / Channels */}
+        <Section title="Mixer" icon="🎚">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <RotaryKnob label="Swing" value={swing} onChange={setSwing} min={0} max={1} step={0.01} size={48} />
+          </div>
+          <div style={{ fontSize: 9, fontWeight: 700, color: T.textMuted, fontFamily: T.font, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>
+            Channels
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+            {[1, 2, 3, 4].map(ch => {
+              const chSounds = PO32_SOUNDS.filter(s => s.ch === ch);
+              const muted = mutedChannels[ch - 1];
+              return (
+                <div key={ch} onClick={() => toggleMute(ch - 1)} style={{
+                  padding: "6px 10px", borderRadius: T.radius,
+                  border: `1px solid ${muted ? T.border : chSounds[0].color + "44"}`,
+                  background: muted ? T.surfaceAlt : `${chSounds[0].color}0a`,
+                  cursor: "pointer", transition: "all 80ms",
+                  opacity: muted ? 0.4 : 1,
+                }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: muted ? T.textMuted : T.text, fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase", marginBottom: 2 }}>
+                    Ch {ch} {muted ? "(Muted)" : ""}
+                  </div>
+                  <div style={{ fontSize: 8, color: T.textMuted, fontFamily: T.font }}>
+                    {chSounds.map(s => s.short).join(" · ")}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      </div>
+
+      {/* My PO-32 Presets */}
+      <Section title="My PO-32 Presets" icon="💾" style={{ marginTop: 12 }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+          <input
+            value={newPo32PresetName}
+            onChange={(e) => setNewPo32PresetName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && savePo32Preset()}
+            placeholder="Pattern name…"
+            style={{
+              flex: 1, height: 36, fontSize: 13, padding: "0 10px",
+              background: T.surface, color: T.white,
+              border: `1px solid ${T.border}`, borderRadius: 8,
+              outline: "none", minWidth: 0, fontFamily: T.font,
+            }}
+          />
+          <button onClick={savePo32Preset} disabled={!newPo32PresetName.trim()} style={{
+            ...btnPrimary, height: 34, padding: "0 14px", fontSize: 10,
+            opacity: newPo32PresetName.trim() ? 1 : 0.4,
+            cursor: newPo32PresetName.trim() ? "pointer" : "not-allowed",
+          }}>
+            Save
+          </button>
+        </div>
+        {po32Presets.length === 0 ? (
+          <div style={{ fontSize: 12, color: T.textMuted, textAlign: "center", padding: "8px 0" }}>
+            No saved PO-32 presets yet
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {po32Presets.map((p) => (
+              <div key={p.name} style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "5px 10px", borderRadius: 2,
+                border: `1px solid ${T.border}`,
+                background: "linear-gradient(180deg, #2e2820, #1a1510)",
+              }}>
+                <button onClick={() => loadPo32Preset(p)} style={{
+                  flex: 1, background: "none", border: "none",
+                  color: T.text, fontSize: 10, fontWeight: 700,
+                  cursor: "pointer", textAlign: "left", padding: 0,
+                  fontFamily: T.font, letterSpacing: 0.8, textTransform: "uppercase",
+                }}>
+                  {p.name}
+                </button>
+                <span style={{ fontSize: 9, color: T.textMuted, fontFamily: T.font }}>{p.tempo}bpm</span>
+                <button onClick={() => deletePo32Preset(p.name)} title="Delete" style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  color: T.textMuted, fontSize: 14, padding: "0 2px", lineHeight: 1,
+                }}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  MAIN APP
 // ═══════════════════════════════════════════════════════════════════
 export default function GraphingCalculatorSynthApp() {
-  const [page, setPage] = useState("synth"); // "synth" | "draw"
+  const [page, setPage] = useState("synth"); // "synth" | "draw" | "drums"
   const [equationInput, setEquationInput] = useState(DEFAULT_EQ);
   const [equation, setEquation] = useState(DEFAULT_EQ);
   const [xScale, setXScale] = useState(1);
@@ -1108,6 +2441,9 @@ export default function GraphingCalculatorSynthApp() {
   const [playbackPos, setPlaybackPos] = useState(0);
   const [recDuration, setRecDuration] = useState(0);
   const [audioExporting, setAudioExporting] = useState(false);
+  const [trimStart, setTrimStart] = useState(0);   // 0..1 normalized
+  const [trimEnd, setTrimEnd] = useState(1);         // 0..1 normalized
+  const [trimming, setTrimming] = useState(false);
   const recStartRef = useRef(0);
   const recEventsRef = useRef([]);
   const playTimerRef = useRef(null);
@@ -1517,6 +2853,9 @@ export default function GraphingCalculatorSynthApp() {
         recStateRef.current = "recording";
         setRecordedEvents([]);
         setRecDuration(0);
+        setTrimStart(0);
+        setTrimEnd(1);
+        setTrimming(false);
         setRecState("recording");
       } else {
         setCountdown(count);
@@ -1708,6 +3047,22 @@ export default function GraphingCalculatorSynthApp() {
     step();
   };
 
+  // Trim helpers
+  const applyTrim = () => {
+    if (!recordedEvents.length || recDuration <= 0) return;
+    const tMin = trimStart * recDuration;
+    const tMax = trimEnd * recDuration;
+    const trimmed = recordedEvents
+      .filter(e => e.t >= tMin && e.t <= tMax)
+      .map(e => ({ ...e, t: e.t - tMin }));
+    const newDur = tMax - tMin;
+    setRecordedEvents(trimmed);
+    setRecDuration(newDur);
+    setTrimStart(0);
+    setTrimEnd(1);
+    setTrimming(false);
+  };
+
   // Cleanup on unmount
   useEffect(() => () => {
     if (playTimerRef.current) clearTimeout(playTimerRef.current);
@@ -1837,7 +3192,7 @@ export default function GraphingCalculatorSynthApp() {
           <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase", color: T.amber }}>WaveCraft</span>
           <span style={{ fontSize: 10, color: T.textMuted, fontWeight: 500, marginLeft: 4, letterSpacing: 2 }}>v0.1</span>
           <div style={{ display: "flex", marginLeft: 16, gap: 2 }}>
-            {[{ id: "synth", label: "SYNTH" }, { id: "draw", label: "DRAW" }].map((tab) => (
+            {[{ id: "synth", label: "SYNTH" }, { id: "draw", label: "DRAW" }, { id: "drums", label: "DRUMS" }].map((tab) => (
               <button key={tab.id} onClick={() => setPage(tab.id)} style={{
                 height: 28, padding: "0 14px", fontSize: 11, fontWeight: 700,
                 fontFamily: T.font, letterSpacing: 1.5, textTransform: "uppercase",
@@ -1883,10 +3238,16 @@ export default function GraphingCalculatorSynthApp() {
         </div>
       </div>
 
+      {/* ── Drum machines (always mounted for persistence) ────── */}
+      <div style={{ display: page === "drums" ? "block" : "none" }}>
+        <DrumMachine audioCtxRef={audioCtxRef} gainRef={gainRef} setupAudio={setupAudio} />
+        <PO32Tonic audioCtxRef={audioCtxRef} gainRef={gainRef} setupAudio={setupAudio} />
+      </div>
+
       {/* ── page content ─────────────────────────────────────────── */}
       {page === "draw" ? (
         <WaveDrawer onUseWave={onUseWave} />
-      ) : (
+      ) : page === "drums" ? null : (
       <div style={{ maxWidth: 1480, margin: "0 auto", padding: "20px 20px 40px" }}>
         <div style={{
           display: "grid",
@@ -2191,28 +3552,144 @@ export default function GraphingCalculatorSynthApp() {
 
               {/* Mini timeline */}
               {recordedEvents.length > 0 && recDuration > 0 && (
-                <div style={{
-                  marginTop: 8, height: 24, background: T.surface,
-                  borderRadius: 6, border: `1px solid ${T.border}`,
-                  position: "relative", overflow: "hidden",
-                }}>
-                  {/* event ticks */}
-                  {recordedEvents.filter(e => e.type === "on").map((e, i) => (
-                    <div key={i} style={{
-                      position: "absolute", left: `${(e.t / recDuration) * 100}%`,
-                      top: 4, bottom: 4, width: 2, borderRadius: 1,
-                      background: T.accent, opacity: 0.5,
-                    }} />
-                  ))}
-                  {/* playhead */}
-                  {recState === "playing" && (
-                    <div style={{
-                      position: "absolute",
-                      left: `${(Math.min(playbackPos, recDuration) / recDuration) * 100}%`,
-                      top: 0, bottom: 0, width: 2,
-                      background: T.green, boxShadow: `0 0 6px ${T.greenGlow}`,
-                    }} />
-                  )}
+                <div style={{ marginTop: 8 }}>
+                  <div
+                    style={{
+                      height: 32, background: T.surface,
+                      borderRadius: 6, border: `1px solid ${T.border}`,
+                      position: "relative", overflow: "hidden",
+                    }}
+                    onMouseDown={(e) => {
+                      if (recState === "recording" || recState === "countdown") return;
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const x = (e.clientX - rect.left) / rect.width;
+                      // Determine if near a handle
+                      const dStart = Math.abs(x - trimStart);
+                      const dEnd = Math.abs(x - trimEnd);
+                      const threshold = 0.03;
+                      let dragging = null;
+                      if (dStart < threshold && dStart <= dEnd) dragging = "start";
+                      else if (dEnd < threshold) dragging = "end";
+                      else if (x > trimStart && x < trimEnd) dragging = x - trimStart < trimEnd - x ? "start" : "end";
+                      else dragging = x < trimStart ? "start" : "end";
+                      if (!dragging) return;
+                      setTrimming(true);
+                      const onMove = (ev) => {
+                        const nx = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+                        if (dragging === "start") setTrimStart(s => Math.min(nx, trimEnd - 0.01));
+                        else setTrimEnd(s => Math.max(nx, trimStart + 0.01));
+                      };
+                      const onUp = () => {
+                        window.removeEventListener("mousemove", onMove);
+                        window.removeEventListener("mouseup", onUp);
+                      };
+                      window.addEventListener("mousemove", onMove);
+                      window.addEventListener("mouseup", onUp);
+                    }}
+                  >
+                    {/* Dimmed regions outside trim */}
+                    {(trimStart > 0 || trimEnd < 1) && (
+                      <>
+                        <div style={{
+                          position: "absolute", left: 0, top: 0, bottom: 0,
+                          width: `${trimStart * 100}%`,
+                          background: "rgba(0,0,0,0.45)", zIndex: 2,
+                        }} />
+                        <div style={{
+                          position: "absolute", right: 0, top: 0, bottom: 0,
+                          width: `${(1 - trimEnd) * 100}%`,
+                          background: "rgba(0,0,0,0.45)", zIndex: 2,
+                        }} />
+                      </>
+                    )}
+                    {/* Trim handles */}
+                    {(trimStart > 0 || trimEnd < 1 || trimming) && (
+                      <>
+                        <div style={{
+                          position: "absolute", left: `${trimStart * 100}%`, top: 0, bottom: 0,
+                          width: 3, background: T.amber, zIndex: 3, cursor: "ew-resize",
+                          boxShadow: `0 0 6px rgba(245,158,11,0.5)`,
+                        }} />
+                        <div style={{
+                          position: "absolute", left: `${trimEnd * 100}%`, top: 0, bottom: 0,
+                          width: 3, background: T.amber, zIndex: 3, cursor: "ew-resize",
+                          transform: "translateX(-3px)",
+                          boxShadow: `0 0 6px rgba(245,158,11,0.5)`,
+                        }} />
+                      </>
+                    )}
+                    {/* event ticks */}
+                    {recordedEvents.filter(e => e.type === "on").map((e, i) => (
+                      <div key={i} style={{
+                        position: "absolute", left: `${(e.t / recDuration) * 100}%`,
+                        top: 4, bottom: 4, width: 2, borderRadius: 1,
+                        background: T.accent, opacity: 0.5,
+                      }} />
+                    ))}
+                    {/* playhead */}
+                    {recState === "playing" && (
+                      <div style={{
+                        position: "absolute",
+                        left: `${(Math.min(playbackPos, recDuration) / recDuration) * 100}%`,
+                        top: 0, bottom: 0, width: 2,
+                        background: T.green, boxShadow: `0 0 6px ${T.greenGlow}`, zIndex: 4,
+                      }} />
+                    )}
+                  </div>
+                  {/* Trim controls */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                    <button
+                      onClick={() => {
+                        if (trimStart === 0 && trimEnd === 1) {
+                          // Enter trim mode – set initial handles slightly inward
+                          setTrimStart(0);
+                          setTrimEnd(1);
+                          setTrimming(true);
+                        } else {
+                          // Cancel trim
+                          setTrimStart(0);
+                          setTrimEnd(1);
+                          setTrimming(false);
+                        }
+                      }}
+                      style={{
+                        ...btnGhost, fontSize: 12, padding: "4px 10px",
+                        background: trimming || (trimStart > 0 || trimEnd < 1)
+                          ? "linear-gradient(180deg, #cc6e08, #a05500)" : undefined,
+                        color: trimming || (trimStart > 0 || trimEnd < 1) ? "#f0e6d2" : T.text,
+                        border: `1px solid ${trimming || (trimStart > 0 || trimEnd < 1) ? "rgba(255,180,60,0.4)" : T.border}`,
+                      }}
+                    >
+                      ✂ Trim
+                    </button>
+                    {(trimStart > 0 || trimEnd < 1) && (
+                      <>
+                        <span style={{ fontSize: 11, color: T.textMuted, fontVariantNumeric: "tabular-nums" }}>
+                          {(trimStart * recDuration).toFixed(2)}s – {(trimEnd * recDuration).toFixed(2)}s
+                        </span>
+                        <button
+                          onClick={applyTrim}
+                          disabled={recState === "playing" || recState === "recording"}
+                          style={{
+                            ...btnGhost, fontSize: 12, padding: "4px 10px",
+                            background: "linear-gradient(180deg, #166534, #14532d)",
+                            color: "#bbf7d0",
+                            border: "1px solid rgba(34,197,94,0.3)",
+                            opacity: (recState === "playing" || recState === "recording") ? 0.4 : 1,
+                            cursor: (recState === "playing" || recState === "recording") ? "not-allowed" : "pointer",
+                          }}
+                        >
+                          ✓ Apply
+                        </button>
+                        <button
+                          onClick={() => { setTrimStart(0); setTrimEnd(1); setTrimming(false); }}
+                          style={{ ...btnGhost, fontSize: 12, padding: "4px 10px" }}
+                        >
+                          ✕ Reset
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
             </Section>
