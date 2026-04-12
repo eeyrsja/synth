@@ -16,6 +16,31 @@ const FILTER_TYPES = [
   { value: "bandpass", label: "Band-Pass" },
 ];
 
+const LFO_SHAPES = ["sine", "triangle", "square", "saw", "s&h"];
+const LFO_TARGETS = [
+  { value: "a", label: "Param A" },
+  { value: "b", label: "Param B" },
+  { value: "c", label: "Param C" },
+  { value: "d", label: "Param D" },
+  { value: "cutoff", label: "Filter Cutoff" },
+  { value: "resonance", label: "Filter Reso" },
+  { value: "volume", label: "Volume" },
+];
+
+const DEFAULT_LFO = { enabled: false, shape: "sine", rate: 1, depth: 0, target: "a", phase: 0 };
+
+function lfoSample(shape, phase, prevSH) {
+  const p = ((phase % 1) + 1) % 1;
+  switch (shape) {
+    case "sine": return Math.sin(p * Math.PI * 2);
+    case "triangle": return 1 - 4 * Math.abs(p - 0.5);
+    case "square": return p < 0.5 ? 1 : -1;
+    case "saw": return 2 * p - 1;
+    case "s&h": return prevSH;
+    default: return 0;
+  }
+}
+
 const PRESETS = [
   { name: "Pure Sine",  eq: "sin(x)",                                           a: 1,      b: 0,    c: 0,     d: 0 },
   { name: "FM Bell",    eq: "sin(x + a*sin(b*x))",                              a: 3,      b: 7,    c: 0,     d: 0 },
@@ -619,6 +644,58 @@ function Spectrum({ analyserRef }) {
   );
 }
 
+// ─── LFO Mini Scope ─────────────────────────────────────────────────
+function LfoScope({ shape, rate, lfoOutputRef, index }) {
+  const canvasRef = useRef(null);
+  const animRef = useRef(null);
+  useEffect(() => {
+    const draw = () => {
+      animRef.current = requestAnimationFrame(draw);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width, h = canvas.height;
+      ctx.fillStyle = "#080c08";
+      ctx.fillRect(0, 0, w, h);
+      // center line
+      ctx.strokeStyle = T.border;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
+      // waveform shape preview
+      ctx.strokeStyle = T.amber;
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = "rgba(255,170,0,0.4)";
+      ctx.shadowBlur = 4;
+      ctx.beginPath();
+      for (let px = 0; px < w; px++) {
+        const phase = (px / w) * 2; // show 2 cycles
+        const val = lfoSample(shape, phase, 0);
+        const py = (1 - val) * h / 2;
+        px === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      // playhead indicator from live output
+      const liveVal = lfoOutputRef.current[index];
+      const iy = (1 - liveVal) * h / 2;
+      ctx.fillStyle = T.green;
+      ctx.shadowColor = T.greenGlow;
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.arc(w - 6, clamp(iy, 3, h - 3), 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    };
+    draw();
+    return () => cancelAnimationFrame(animRef.current);
+  }, [shape, rate, lfoOutputRef, index]);
+  return (
+    <canvas ref={canvasRef} width={120} height={36}
+      style={{ width: "100%", height: 36, borderRadius: T.radius, border: `1px solid ${T.border}` }}
+    />
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  WAVE DRAWER PAGE
 // ═══════════════════════════════════════════════════════════════════
@@ -848,6 +925,124 @@ export default function GraphingCalculatorSynthApp() {
   const [filter, setFilter] = useState({ type: "allpass", cutoff: 18000, resonance: 0.7 });
   const [add7th, setAdd7th] = useState(false);
 
+  // ── Auth & Cloud Presets ──────────────────────────────────────────
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem("wavecraft_token") || null);
+  const [authUser, setAuthUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("wavecraft_user") || "null"); } catch { return null; }
+  });
+  const [authModal, setAuthModal] = useState(null); // null | "login" | "signup"
+  const [authForm, setAuthForm] = useState({ email: "", password: "", displayName: "" });
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [cloudPresets, setCloudPresets] = useState([]);
+  const [cloudLoading, setCloudLoading] = useState(false);
+
+  const apiFetch = async (path, opts = {}) => {
+    const headers = { "Content-Type": "application/json", ...opts.headers };
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+    const res = await fetch(path, { ...opts, headers });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Request failed");
+    return data;
+  };
+
+  const doLogin = async () => {
+    setAuthError(""); setAuthLoading(true);
+    try {
+      const { token, user } = await apiFetch("/api/login", {
+        method: "POST", body: JSON.stringify({ email: authForm.email, password: authForm.password }),
+      });
+      setAuthToken(token); setAuthUser(user);
+      localStorage.setItem("wavecraft_token", token);
+      localStorage.setItem("wavecraft_user", JSON.stringify(user));
+      setAuthModal(null); setAuthForm({ email: "", password: "", displayName: "" });
+      fetchCloudPresets(token);
+    } catch (e) { setAuthError(e.message); }
+    setAuthLoading(false);
+  };
+
+  const doSignup = async () => {
+    setAuthError(""); setAuthLoading(true);
+    try {
+      const { token, user } = await apiFetch("/api/signup", {
+        method: "POST", body: JSON.stringify({ email: authForm.email, password: authForm.password, displayName: authForm.displayName }),
+      });
+      setAuthToken(token); setAuthUser(user);
+      localStorage.setItem("wavecraft_token", token);
+      localStorage.setItem("wavecraft_user", JSON.stringify(user));
+      setAuthModal(null); setAuthForm({ email: "", password: "", displayName: "" });
+      fetchCloudPresets(token);
+    } catch (e) { setAuthError(e.message); }
+    setAuthLoading(false);
+  };
+
+  const doLogout = () => {
+    setAuthToken(null); setAuthUser(null); setCloudPresets([]);
+    localStorage.removeItem("wavecraft_token");
+    localStorage.removeItem("wavecraft_user");
+  };
+
+  const fetchCloudPresets = async (token) => {
+    setCloudLoading(true);
+    try {
+      const headers = { Authorization: `Bearer ${token || authToken}` };
+      const { presets } = await apiFetch("/api/presets", { headers });
+      setCloudPresets(presets);
+    } catch { /* silently fail — user can retry */ }
+    setCloudLoading(false);
+  };
+
+  const saveCloudPreset = async (name) => {
+    if (!authToken || !name) return;
+    const data = {
+      eq: equationInput, a, b, c, d, xScale, yScale, masterVolume,
+      adsr: { ...adsr }, filter: { ...filter },
+      fxParams: JSON.parse(JSON.stringify(fxParams)),
+      add7th, lfos: JSON.parse(JSON.stringify(lfos)),
+      drawnWave: drawnWaveRef.current ? Array.from(drawnWaveRef.current) : null,
+    };
+    await apiFetch("/api/presets", { method: "POST", body: JSON.stringify({ name, data }) });
+    fetchCloudPresets();
+  };
+
+  const loadCloudPreset = async (id) => {
+    try {
+      const { preset } = await apiFetch(`/api/presets/${id}`);
+      loadUserPreset(preset.data);
+    } catch { /* ignore */ }
+  };
+
+  const deleteCloudPreset = async (id) => {
+    await apiFetch(`/api/presets/${id}`, { method: "DELETE" });
+    fetchCloudPresets();
+  };
+
+  // Fetch cloud presets on mount if logged in
+  useEffect(() => {
+    if (authToken) fetchCloudPresets();
+  }, []);
+
+  // ── LFO state ──────────────────────────────────────────────────────
+  const [lfos, setLfos] = useState([
+    { ...DEFAULT_LFO },
+    { ...DEFAULT_LFO, target: "b" },
+    { ...DEFAULT_LFO, target: "cutoff" },
+  ]);
+  const lfosRef = useRef(lfos);
+  lfosRef.current = lfos;
+  const lfoPhaseRef = useRef([0, 0, 0]);
+  const lfoSHRef = useRef([0, 0, 0]); // sample & hold values
+  const lfoOutputRef = useRef([0, 0, 0]); // current LFO output for display
+  const lfoBaseRef = useRef({ a: 1, b: 0, c: 0, d: 0, cutoff: 18000, resonance: 0.7, volume: 0.18 });
+
+  const updateLfo = (idx, key, val) => {
+    setLfos((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [key]: val };
+      return next;
+    });
+  };
+
   // ── User Presets (localStorage) ──────────────────────────────────
   const [userPresets, setUserPresets] = useState(() => {
     try { return JSON.parse(localStorage.getItem("wavecraft_presets") || "[]"); } catch { return []; }
@@ -867,6 +1062,7 @@ export default function GraphingCalculatorSynthApp() {
       filter: { ...filter },
       fxParams: JSON.parse(JSON.stringify(fxParams)),
       add7th,
+      lfos: JSON.parse(JSON.stringify(lfos)),
       drawnWave: drawnWaveRef.current ? Array.from(drawnWaveRef.current) : null,
     };
     const existing = userPresets.findIndex((p) => p.name === name);
@@ -894,6 +1090,7 @@ export default function GraphingCalculatorSynthApp() {
     if (p.filter) setFilter(p.filter);
     if (p.fxParams) setFxParams(p.fxParams);
     if (p.add7th != null) setAdd7th(p.add7th);
+    if (p.lfos) setLfos(p.lfos);
   };
 
   const deleteUserPreset = (name) => {
@@ -1196,6 +1393,70 @@ export default function GraphingCalculatorSynthApp() {
     reverbDecayRef.current = fxParams.reverb.decay;
     fx.reverb.conv.buffer = generateIR(ctx, fxParams.reverb.decay);
   }, [fxParams.reverb.decay]);
+
+  // ── LFO modulation loop ───────────────────────────────────────────
+  useEffect(() => {
+    let lastTime = performance.now();
+    let animId;
+    const tick = () => {
+      animId = requestAnimationFrame(tick);
+      const now = performance.now();
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+      const currentLfos = lfosRef.current;
+      let anyActive = false;
+      // Snapshot base values for modulation targets
+      const bases = lfoBaseRef.current;
+      // Accumulate modulations per target
+      const mods = { a: 0, b: 0, c: 0, d: 0, cutoff: 0, resonance: 0, volume: 0 };
+      for (let i = 0; i < 3; i++) {
+        const l = currentLfos[i];
+        if (!l.enabled || l.depth === 0) { lfoOutputRef.current[i] = 0; continue; }
+        anyActive = true;
+        lfoPhaseRef.current[i] += l.rate * dt;
+        const ph = lfoPhaseRef.current[i];
+        // S&H: resample at each cycle
+        if (l.shape === "s&h") {
+          const prevPh = ph - l.rate * dt;
+          if (Math.floor(ph) !== Math.floor(prevPh)) {
+            lfoSHRef.current[i] = Math.random() * 2 - 1;
+          }
+        }
+        const val = lfoSample(l.shape, ph, lfoSHRef.current[i]);
+        lfoOutputRef.current[i] = val;
+        mods[l.target] += val * l.depth;
+      }
+      if (!anyActive) return;
+      // Apply modulations to params ref (audio thread reads these)
+      paramsRef.current = {
+        a: bases.a + mods.a,
+        b: bases.b + mods.b,
+        c: bases.c + mods.c,
+        d: bases.d + mods.d,
+      };
+      // Apply filter modulations directly to audio nodes
+      const filterNode = filterNodeRef.current;
+      if (filterNode && mods.cutoff !== 0) {
+        const modded = clamp(bases.cutoff * Math.pow(2, mods.cutoff * 2), 60, 20000);
+        filterNode.frequency.value = modded;
+      }
+      if (filterNode && mods.resonance !== 0) {
+        filterNode.Q.value = clamp(bases.resonance + mods.resonance * 10, 0.1, 20);
+      }
+      if (gainRef.current && mods.volume !== 0) {
+        gainRef.current.gain.value = clamp(bases.volume + mods.volume * 0.3, 0, 0.5);
+      }
+    };
+    animId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animId);
+  }, []);
+
+  // Keep LFO base values in sync with UI state
+  useEffect(() => {
+    lfoBaseRef.current = { a, b, c, d, cutoff: filter.cutoff, resonance: filter.resonance, volume: masterVolume };
+    // Also reset paramsRef when base values change (so non-LFO'd params stay correct)
+    paramsRef.current = { a, b, c, d };
+  }, [a, b, c, d, filter.cutoff, filter.resonance, masterVolume]);
 
   // ── MIDI ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1500,6 +1761,63 @@ export default function GraphingCalculatorSynthApp() {
     }}>
       {/* CRT scanline overlay */}
       <div className="crt-overlay" />
+
+      {/* ── Auth Modal ──────────────────────────────────────────── */}
+      {authModal && (
+        <div onClick={() => setAuthModal(null)} style={{
+          position: "fixed", inset: 0, zIndex: 9999,
+          background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            width: 340, background: "linear-gradient(180deg, #2a2218, #14110c)",
+            border: `2px solid ${T.borderHi}`, borderRadius: 4, padding: 28,
+            boxShadow: "0 8px 40px rgba(0,0,0,0.7)",
+          }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: T.amber, letterSpacing: 3, textTransform: "uppercase", marginBottom: 20, textAlign: "center" }}>
+              {authModal === "login" ? "Sign In" : "Create Account"}
+            </div>
+            {authError && (
+              <div style={{ marginBottom: 12, padding: "8px 12px", borderRadius: 2, background: "rgba(255,60,60,0.15)", border: "1px solid rgba(255,60,60,0.3)", color: "#ff6b6b", fontSize: 11, fontFamily: T.monoFont }}>
+                {authError}
+              </div>
+            )}
+            {authModal === "signup" && (
+              <input
+                value={authForm.displayName} onChange={(e) => setAuthForm((f) => ({ ...f, displayName: e.target.value }))}
+                placeholder="Display name" autoComplete="name"
+                style={{ width: "100%", height: 36, fontSize: 13, padding: "0 10px", marginBottom: 10, boxSizing: "border-box", background: T.surface, color: T.white, border: `1px solid ${T.border}`, borderRadius: 2, outline: "none", fontFamily: T.monoFont }}
+              />
+            )}
+            <input
+              value={authForm.email} onChange={(e) => setAuthForm((f) => ({ ...f, email: e.target.value }))}
+              placeholder="Email" type="email" autoComplete="email"
+              style={{ width: "100%", height: 36, fontSize: 13, padding: "0 10px", marginBottom: 10, boxSizing: "border-box", background: T.surface, color: T.white, border: `1px solid ${T.border}`, borderRadius: 2, outline: "none", fontFamily: T.monoFont }}
+            />
+            <input
+              value={authForm.password} onChange={(e) => setAuthForm((f) => ({ ...f, password: e.target.value }))}
+              placeholder="Password" type="password" autoComplete={authModal === "login" ? "current-password" : "new-password"}
+              onKeyDown={(e) => e.key === "Enter" && (authModal === "login" ? doLogin() : doSignup())}
+              style={{ width: "100%", height: 36, fontSize: 13, padding: "0 10px", marginBottom: 16, boxSizing: "border-box", background: T.surface, color: T.white, border: `1px solid ${T.border}`, borderRadius: 2, outline: "none", fontFamily: T.monoFont }}
+            />
+            <button
+              onClick={authModal === "login" ? doLogin : doSignup}
+              disabled={authLoading}
+              style={{ ...btnPrimary, width: "100%", height: 38, fontSize: 12, marginBottom: 12, opacity: authLoading ? 0.6 : 1 }}
+            >
+              {authLoading ? "..." : authModal === "login" ? "Sign In" : "Create Account"}
+            </button>
+            <div style={{ textAlign: "center", fontSize: 11, color: T.textMuted }}>
+              {authModal === "login" ? "No account? " : "Already have one? "}
+              <span
+                onClick={() => { setAuthModal(authModal === "login" ? "signup" : "login"); setAuthError(""); }}
+                style={{ color: T.amber, cursor: "pointer", textDecoration: "underline" }}
+              >
+                {authModal === "login" ? "Sign up" : "Sign in"}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ── top bar ──────────────────────────────────────────────── */}
       <div style={{
         height: 52, background: "linear-gradient(180deg, #2a2218 0%, #1a1510 100%)",
@@ -1541,6 +1859,27 @@ export default function GraphingCalculatorSynthApp() {
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: activeNotes.length ? T.green : T.textMuted }} />
             {midiStatus}
           </Pill>
+          {authUser ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 10, color: T.green, fontFamily: T.monoFont, letterSpacing: 1, textTransform: "uppercase" }}>
+                {authUser.displayName || authUser.email}
+              </span>
+              <button onClick={doLogout} style={{
+                height: 24, padding: "0 10px", fontSize: 9, fontWeight: 700,
+                fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase",
+                border: `1px solid ${T.border}`, borderRadius: 2, cursor: "pointer",
+                background: "linear-gradient(180deg, #2e2820, #1a1510)", color: T.textDim,
+              }}>Logout</button>
+            </div>
+          ) : (
+            <button onClick={() => { setAuthModal("login"); setAuthError(""); }} style={{
+              height: 28, padding: "0 14px", fontSize: 10, fontWeight: 700,
+              fontFamily: T.font, letterSpacing: 1.5, textTransform: "uppercase",
+              border: `1px solid ${T.accent}`, borderRadius: 2, cursor: "pointer",
+              background: "linear-gradient(180deg, #cc6e08, #a05500)", color: "#f0e6d2",
+              boxShadow: `0 0 8px ${T.accentGlow}`,
+            }}>Sign In</button>
+          )}
         </div>
       </div>
 
@@ -1647,7 +1986,7 @@ export default function GraphingCalculatorSynthApp() {
                     outline: "none", minWidth: 0,
                   }}
                 />
-                <button onClick={saveUserPreset} disabled={!newPresetName.trim()} style={{
+                <button onClick={() => { saveUserPreset(); if (authToken && newPresetName.trim()) saveCloudPreset(newPresetName.trim()); }} disabled={!newPresetName.trim()} style={{
                   ...btnPrimary, height: 34, padding: "0 14px", fontSize: 10,
                   opacity: newPresetName.trim() ? 1 : 0.4,
                   cursor: newPresetName.trim() ? "pointer" : "not-allowed",
@@ -1685,9 +2024,44 @@ export default function GraphingCalculatorSynthApp() {
                 </div>
               )}
             </Section>
-          </div>
 
-          {/* ── CENTER COLUMN: Audio + Keyboard ──────────────────── */}
+            {/* Cloud Presets */}
+            {authUser && (
+              <Section title="Cloud Presets" icon="☁️" style={{ marginTop: 12 }}>
+                {cloudLoading ? (
+                  <div style={{ fontSize: 11, color: T.textMuted, textAlign: "center", padding: "8px 0", fontFamily: T.monoFont }}>Loading…</div>
+                ) : cloudPresets.length === 0 ? (
+                  <div style={{ fontSize: 11, color: T.textMuted, textAlign: "center", padding: "8px 0" }}>
+                    No cloud presets — save one above while signed in
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    {cloudPresets.map((p) => (
+                      <div key={p.id} style={{
+                        display: "flex", alignItems: "center", gap: 6,
+                        padding: "5px 10px", borderRadius: 2,
+                        border: `1px solid ${T.border}`,
+                        background: "linear-gradient(180deg, #1a2218, #101a10)",
+                      }}>
+                        <button onClick={() => loadCloudPreset(p.id)} style={{
+                          flex: 1, background: "none", border: "none",
+                          color: T.green, fontSize: 10, fontWeight: 700,
+                          cursor: "pointer", textAlign: "left", padding: 0,
+                          fontFamily: T.monoFont, letterSpacing: 0.8, textTransform: "uppercase",
+                        }}>
+                          ☁ {p.name}
+                        </button>
+                        <button onClick={() => deleteCloudPreset(p.id)} title="Delete" style={{
+                          background: "none", border: "none", cursor: "pointer",
+                          color: T.textMuted, fontSize: 14, padding: "0 2px", lineHeight: 1,
+                        }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Section>
+            )}
+          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Section title="Audio Engine" icon="🔊">
               <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -2064,7 +2438,88 @@ export default function GraphingCalculatorSynthApp() {
               </div>
             </Section>
 
-            <FeaturePlaceholder label="LFO Modulation" description="Auto-modulate parameters over time" />
+            <Section title="LFO Modulation" icon="〰">
+              {lfos.map((lfo, i) => (
+                <div key={i} style={{
+                  marginBottom: i < 2 ? 8 : 0, borderRadius: T.radius,
+                  border: `1px solid ${lfo.enabled ? "rgba(255,180,60,0.25)" : T.border}`,
+                  background: lfo.enabled ? T.accentSoft : T.surface,
+                  overflow: "hidden", transition: "all 100ms",
+                }}>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "6px 10px",
+                  }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: T.amber, fontFamily: T.font, letterSpacing: 1 }}>
+                      LFO {i + 1}
+                    </span>
+                    <span style={{ flex: 1 }} />
+                    <span style={{ fontSize: 9, color: T.textDim, fontFamily: T.font }}>
+                      → {LFO_TARGETS.find(t => t.value === lfo.target)?.label}
+                    </span>
+                    <div
+                      onClick={() => updateLfo(i, "enabled", !lfo.enabled)}
+                      style={{
+                        width: 32, height: 16, borderRadius: 2, padding: 2,
+                        background: lfo.enabled ? T.accent : "#181208",
+                        border: `1px solid ${lfo.enabled ? T.accent : T.borderHi}`,
+                        cursor: "pointer", transition: "all 100ms",
+                        display: "flex", alignItems: "center",
+                        justifyContent: lfo.enabled ? "flex-end" : "flex-start",
+                        boxShadow: lfo.enabled ? `0 0 6px ${T.accentGlow}` : "none",
+                      }}
+                    >
+                      <div style={{
+                        width: 10, height: 10, borderRadius: 1,
+                        background: lfo.enabled ? "#f0e6d2" : T.textMuted, transition: "all 100ms",
+                      }} />
+                    </div>
+                  </div>
+                  {lfo.enabled && (
+                    <div style={{ padding: "4px 10px 10px", borderTop: `1px solid ${T.border}` }}>
+                      <LfoScope shape={lfo.shape} rate={lfo.rate} lfoOutputRef={lfoOutputRef} index={i} />
+                      <div style={{ display: "flex", gap: 4, marginTop: 6, marginBottom: 6 }}>
+                        {LFO_SHAPES.map((s) => (
+                          <button key={s} onClick={() => updateLfo(i, "shape", s)} style={{
+                            flex: 1, height: 22, fontSize: 8, fontWeight: 700,
+                            fontFamily: T.font, letterSpacing: 0.8, textTransform: "uppercase",
+                            border: `1px solid ${lfo.shape === s ? T.accent : T.border}`,
+                            borderRadius: 2, cursor: "pointer",
+                            background: lfo.shape === s ? "linear-gradient(180deg, #cc6e08, #a05500)" : "linear-gradient(180deg, #2e2820, #1a1510)",
+                            color: lfo.shape === s ? "#f0e6d2" : T.textDim,
+                            padding: 0,
+                          }}>
+                            {s === "s&h" ? "S&H" : s.slice(0, 3).toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                      <div style={{ marginBottom: 4 }}>
+                        <select
+                          value={lfo.target}
+                          onChange={(e) => updateLfo(i, "target", e.target.value)}
+                          style={{
+                            width: "100%", height: 26, borderRadius: 2, fontSize: 9,
+                            border: `1px solid ${T.border}`, background: "#181208",
+                            color: T.text, padding: "0 6px", outline: "none",
+                            fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase",
+                          }}
+                        >
+                          {LFO_TARGETS.map((t) => (
+                            <option key={t.value} value={t.value}>{t.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+                        <RotaryKnob label="Rate" value={lfo.rate} onChange={(v) => updateLfo(i, "rate", v)}
+                          min={0.05} max={20} step={0.05} size={44} />
+                        <RotaryKnob label="Depth" value={lfo.depth} onChange={(v) => updateLfo(i, "depth", v)}
+                          min={0} max={5} step={0.01} size={44} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </Section>
           </div>
         </div>
       </div>
