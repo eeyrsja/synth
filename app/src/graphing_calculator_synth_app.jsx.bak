@@ -1,0 +1,487 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "framer-motion";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { AlertCircle, Piano, Play, Square, Settings2, Waves } from "lucide-react";
+import { evaluate } from "mathjs";
+
+const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+const midiToFreq = (note) => 440 * Math.pow(2, (note - 69) / 12);
+
+const DEFAULT_EQ = "sin(a*x^2 + b*x + c)";
+
+function ParameterSlider({ label, value, onChange, min = -5, max = 5, step = 0.001 }) {
+  const inputRef = useRef(null);
+
+  // Sync the DOM element value imperatively to avoid React controlled-input issues
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.value = String(value);
+    }
+  }, [value]);
+
+  const handleInput = useCallback((e) => {
+    const v = parseFloat(e.target.value);
+    if (!isNaN(v)) onChange(v);
+  }, [onChange]);
+
+  return (
+    <div className="space-y-2">
+      <div className="text-2xl tracking-wide text-slate-100">{label}:</div>
+      <div className="border border-slate-500/70 bg-[#10181d] px-4 py-5 rounded-none">
+        <div className="flex items-center gap-4">
+          <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+            <input
+              ref={inputRef}
+              type="range"
+              min={min}
+              max={max}
+              step={step}
+              defaultValue={value}
+              onInput={handleInput}
+              className="synth-slider"
+            />
+          </div>
+          <div className="w-32 text-right text-2xl text-slate-100 tabular-nums">
+            {value.toFixed(3)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlotCanvas({ equation, params, xScale, yScale }) {
+  const ref = useRef(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width;
+    const height = canvas.height;
+
+    ctx.fillStyle = "#f2f2f2";
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = "#8e8e8e";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, height / 2);
+    ctx.lineTo(width, height / 2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(width / 2, 0);
+    ctx.lineTo(width / 2, height);
+    ctx.stroke();
+
+    try {
+      let first = true;
+      setError("");
+      ctx.strokeStyle = "#1f8b2d";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+
+      for (let px = 0; px < width; px++) {
+        const x = ((px / width) * 2 - 1) * 8 * xScale;
+        const scope = {
+          x,
+          t: 0,
+          note: 60,
+          velocity: 1,
+          ...params,
+          pi: Math.PI,
+          e: Math.E,
+        };
+        let y = evaluate(equation, scope);
+        if (!Number.isFinite(y)) {
+          first = true;
+          continue;
+        }
+        y = clamp(y, -10, 10);
+        const py = height / 2 - (y / (4 / yScale)) * (height / 2);
+        if (first) {
+          ctx.moveTo(px, py);
+          first = false;
+        } else {
+          ctx.lineTo(px, py);
+        }
+      }
+      ctx.stroke();
+    } catch (err) {
+      setError(err.message || "Invalid equation");
+    }
+  }, [equation, params, xScale, yScale]);
+
+  return (
+    <div className="space-y-2">
+      <div className="relative border border-slate-500/70 bg-white w-full aspect-square overflow-hidden">
+        <canvas ref={ref} width={560} height={560} className="w-full h-full block" />
+      </div>
+      {error ? (
+        <div className="flex items-center gap-2 text-sm text-amber-300">
+          <AlertCircle className="w-4 h-4" />
+          <span>{error}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const BLACK_SEMITONES = new Set([1, 3, 6, 8, 10]);
+const KB_START = 48; // C3
+const KB_END = 71;   // B4
+const KB_WHITE_COUNT = 14; // 2 octaves × 7 white keys
+
+function whiteKeysBefore(note) {
+  let count = 0;
+  for (let i = KB_START; i < note; i++) {
+    if (!BLACK_SEMITONES.has(i % 12)) count++;
+  }
+  return count;
+}
+
+function PianoKeyboard({ activeNotes, onNoteOn, onNoteOff }) {
+  const activeSet = new Set(activeNotes);
+  const allNotes = Array.from({ length: KB_END - KB_START + 1 }, (_, i) => KB_START + i);
+  const whiteNotes = allNotes.filter((n) => !BLACK_SEMITONES.has(n % 12));
+  const blackNotes = allNotes.filter((n) => BLACK_SEMITONES.has(n % 12));
+  const whiteW = 100 / KB_WHITE_COUNT;
+  const blackW = whiteW * 0.62;
+
+  const stop = (e) => e.preventDefault();
+
+  return (
+    <div className="relative select-none touch-none" style={{ height: 130 }}>
+      <div className="absolute inset-0 flex gap-px">
+        {whiteNotes.map((note) => (
+          <div
+            key={note}
+            onPointerDown={(e) => { stop(e); onNoteOn(note); }}
+            onPointerUp={(e) => { stop(e); onNoteOff(note); }}
+            onPointerLeave={(e) => { stop(e); onNoteOff(note); }}
+            className={`flex-1 rounded-b-lg border border-slate-400/60 cursor-pointer transition-colors duration-75 ${
+              activeSet.has(note) ? "bg-emerald-300" : "bg-white hover:bg-slate-50"
+            }`}
+          />
+        ))}
+      </div>
+      {blackNotes.map((note) => {
+        const wi = whiteKeysBefore(note);
+        const left = wi * whiteW - blackW / 2;
+        return (
+          <div
+            key={note}
+            onPointerDown={(e) => { stop(e); onNoteOn(note); }}
+            onPointerUp={(e) => { stop(e); onNoteOff(note); }}
+            onPointerLeave={(e) => { stop(e); onNoteOff(note); }}
+            style={{
+              position: "absolute",
+              left: `${left}%`,
+              width: `${blackW}%`,
+              top: 0,
+              height: "58%",
+              zIndex: 10,
+            }}
+            className={`rounded-b-md cursor-pointer transition-colors duration-75 ${
+              activeSet.has(note) ? "bg-emerald-600" : "bg-[#1a1a1a] hover:bg-slate-700"
+            }`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+export default function GraphingCalculatorSynthApp() {
+  const [equationInput, setEquationInput] = useState(DEFAULT_EQ);
+  const [equation, setEquation] = useState(DEFAULT_EQ);
+  const [xScale, setXScale] = useState(1);
+  const [yScale, setYScale] = useState(1);
+  const [a, setA] = useState(-1.149);
+  const [b, setB] = useState(0.113);
+  const [c, setC] = useState(0);
+  const [d, setD] = useState(0);
+  const [audioReady, setAudioReady] = useState(false);
+  const [midiStatus, setMidiStatus] = useState("No MIDI connected");
+  const [activeNotes, setActiveNotes] = useState([]);
+  const [masterVolume, setMasterVolume] = useState(0.18);
+  const [sampleRate, setSampleRate] = useState(44100);
+  const audioCtxRef = useRef(null);
+  const processorRef = useRef(null);
+  const gainRef = useRef(null);
+  const midiAccessRef = useRef(null);
+  const heldNotesRef = useRef(new Map());
+  const phaseRef = useRef(new Map());
+  const lastEquationRef = useRef(DEFAULT_EQ);
+
+  const params = useMemo(() => ({ a, b, c, d }), [a, b, c, d]);
+
+  // Keep a ref to current params so the audio processor always reads live values
+  const paramsRef = useRef({ a, b, c, d });
+  paramsRef.current = { a, b, c, d };
+
+  const buildSampleRef = useRef(null);
+  buildSampleRef.current = (t, freq, velocity, note) => {
+    try {
+      const x = t * freq * 2 * Math.PI;
+      const { a: pa, b: pb, c: pc, d: pd } = paramsRef.current;
+      const raw = evaluate(lastEquationRef.current, {
+        x,
+        t,
+        freq,
+        note,
+        velocity,
+        a: pa,
+        b: pb,
+        c: pc,
+        d: pd,
+        pi: Math.PI,
+        e: Math.E,
+      });
+      if (!Number.isFinite(raw)) return 0;
+      return Math.tanh(raw);
+    } catch {
+      return 0;
+    }
+  };
+
+  const setupAudio = async () => {
+    if (audioCtxRef.current) {
+      await audioCtxRef.current.resume();
+      setAudioReady(true);
+      return;
+    }
+
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioContextCtor();
+    const gain = ctx.createGain();
+    gain.gain.value = masterVolume;
+    gain.connect(ctx.destination);
+
+    const bufferSize = 512;
+    const processor = ctx.createScriptProcessor(bufferSize, 0, 1);
+    processor.onaudioprocess = (event) => {
+      const output = event.outputBuffer.getChannelData(0);
+      const notes = Array.from(heldNotesRef.current.values());
+      for (let i = 0; i < output.length; i++) {
+        if (!notes.length) {
+          output[i] = 0;
+          continue;
+        }
+        let mixed = 0;
+        for (const noteState of notes) {
+          const key = noteState.note;
+          const p = phaseRef.current.get(key) || 0;
+          const t = p / ctx.sampleRate;
+          mixed += buildSampleRef.current(t, noteState.freq, noteState.velocity, noteState.note) * 0.35;
+          phaseRef.current.set(key, p + 1);
+        }
+        output[i] = clamp(mixed / Math.max(notes.length, 1), -1, 1);
+      }
+    };
+
+    processor.connect(gain);
+
+    audioCtxRef.current = ctx;
+    processorRef.current = processor;
+    gainRef.current = gain;
+    setAudioReady(true);
+    setSampleRate(ctx.sampleRate);
+  };
+
+  const noteOn = async (note, velocity = 0.8) => {
+    if (!audioCtxRef.current) await setupAudio();
+    else if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume();
+    heldNotesRef.current.set(note, { note, velocity, freq: midiToFreq(note) });
+    if (!phaseRef.current.has(note)) phaseRef.current.set(note, 0);
+    setActiveNotes(Array.from(heldNotesRef.current.keys()).sort((p, q) => p - q));
+  };
+
+  const noteOff = (note) => {
+    heldNotesRef.current.delete(note);
+    phaseRef.current.delete(note);
+    setActiveNotes(Array.from(heldNotesRef.current.keys()).sort((p, q) => p - q));
+  };
+
+  useEffect(() => {
+    if (gainRef.current) gainRef.current.gain.value = masterVolume;
+  }, [masterVolume]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const initMidi = async () => {
+      if (!navigator.requestMIDIAccess) {
+        if (mounted) setMidiStatus("Web MIDI not supported in this browser");
+        return;
+      }
+
+      try {
+        const access = await navigator.requestMIDIAccess();
+        midiAccessRef.current = access;
+
+        const bindInputs = () => {
+          const inputs = Array.from(access.inputs.values());
+          if (!inputs.length) {
+            setMidiStatus("No MIDI connected");
+            return;
+          }
+          setMidiStatus(`${inputs.length} MIDI input${inputs.length > 1 ? "s" : ""} ready`);
+          inputs.forEach((input) => {
+            input.onmidimessage = async (msg) => {
+              const [status, data1, data2] = msg.data;
+              const cmd = status & 0xf0;
+              if (cmd === 0x90 && data2 > 0) {
+                if (!audioCtxRef.current) await setupAudio();
+                const note = data1;
+                const velocity = data2 / 127;
+                heldNotesRef.current.set(note, {
+                  note,
+                  velocity,
+                  freq: midiToFreq(note),
+                });
+                if (!phaseRef.current.has(note)) phaseRef.current.set(note, 0);
+                setActiveNotes(Array.from(heldNotesRef.current.keys()).sort((x, y) => x - y));
+              } else if (cmd === 0x80 || (cmd === 0x90 && data2 === 0)) {
+                heldNotesRef.current.delete(data1);
+                phaseRef.current.delete(data1);
+                setActiveNotes(Array.from(heldNotesRef.current.keys()).sort((x, y) => x - y));
+              }
+            };
+          });
+        };
+
+        bindInputs();
+        access.onstatechange = bindInputs;
+      } catch {
+        if (mounted) setMidiStatus("MIDI access denied");
+      }
+    };
+
+    initMidi();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const applyEquation = () => {
+    lastEquationRef.current = equationInput;
+    setEquation(equationInput);
+  };
+
+  const panic = () => {
+    heldNotesRef.current.clear();
+    phaseRef.current.clear();
+    setActiveNotes([]);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#1f2a31] text-white p-5">
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+        className="max-w-7xl mx-auto"
+      >
+        <Card className="bg-[#26343c] border-[#3d4b52] rounded-[28px] shadow-2xl overflow-hidden">
+          <CardContent className="p-0">
+            <div className="h-16 border-b border-slate-600/70 flex items-center justify-between px-6 bg-[#1a242b]">
+              <Button variant="outline" className="rounded-xl border-slate-500 bg-transparent text-slate-100 hover:bg-slate-800">
+                <Settings2 className="w-4 h-4 mr-2" />
+                Options
+              </Button>
+              <div className="text-3xl tracking-wide text-slate-100">Live Equation Synth</div>
+              <div className="flex gap-4 text-xl text-slate-500">
+                <span>—</span>
+                <span>✕</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-[520px_1fr_520px] gap-5 p-5">
+              <div className="space-y-3">
+                <PlotCanvas equation={equation} params={params} xScale={xScale} yScale={yScale} />
+                <div className="grid grid-cols-[auto_1fr_auto] gap-0 items-stretch">
+                  <div className="border border-slate-500/70 px-4 flex items-center text-2xl bg-[#26343c]">Equation</div>
+                  <Input
+                    value={equationInput}
+                    onChange={(e) => setEquationInput(e.target.value)}
+                    className="rounded-none text-2xl h-16 border-slate-500/70 bg-[#10181d] text-white placeholder:text-slate-500"
+                    placeholder="sin(a*x^2 + b*x + c)"
+                  />
+                  <Button onClick={applyEquation} className="h-16 px-8 rounded-l-none rounded-r-2xl text-2xl bg-[#26343c] border border-slate-500/70 hover:bg-[#31424b]">
+                    Apply
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-12 pt-3">
+                <ParameterSlider label="X Scale" value={xScale} onChange={setXScale} min={0.1} max={8} step={0.01} />
+                <ParameterSlider label="Y Scale" value={yScale} onChange={setYScale} min={0.1} max={8} step={0.01} />
+
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 text-xl text-slate-200">
+                    <Waves className="w-5 h-5" />
+                    Audio Engine
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <Button onClick={setupAudio} className="h-12 rounded-2xl bg-slate-100 text-slate-900 hover:bg-white">
+                      <Play className="w-4 h-4 mr-2" />
+                      {audioReady ? "Audio Ready" : "Enable Audio"}
+                    </Button>
+                    <Button onClick={panic} variant="outline" className="h-12 rounded-2xl border-slate-500 text-slate-100 bg-transparent">
+                      <Square className="w-4 h-4 mr-2" />
+                      Panic / Note Off
+                    </Button>
+                  </div>
+                  <ParameterSlider label="Master Volume" value={masterVolume} onChange={setMasterVolume} min={0} max={0.5} step={0.001} />
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <Badge className="bg-slate-700 text-slate-100 rounded-lg">{midiStatus}</Badge>
+                    <Badge className="bg-slate-700 text-slate-100 rounded-lg">{sampleRate} Hz</Badge>
+                    {activeNotes.length ? (
+                      <Badge className="bg-emerald-700 text-white rounded-lg">Active: {activeNotes.join(", ")}</Badge>
+                    ) : (
+                      <Badge className="bg-slate-700 text-slate-100 rounded-lg">No active notes</Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-8 pt-3">
+                <ParameterSlider label="a" value={a} onChange={setA} />
+                <ParameterSlider label="b" value={b} onChange={setB} />
+                <ParameterSlider label="c" value={c} onChange={setC} />
+                <ParameterSlider label="d" value={d} onChange={setD} />
+
+                <div className="rounded-3xl border border-slate-500/60 p-4 bg-[#1e2a31] text-slate-200 space-y-3">
+                  <div className="flex items-center gap-2 text-lg">
+                    <Piano className="w-5 h-5" />
+                    Expression variables
+                  </div>
+                  <div className="text-sm leading-6 text-slate-300">
+                    Use <span className="text-white">x</span> as waveform phase input, plus <span className="text-white">t</span>, <span className="text-white">freq</span>, <span className="text-white">note</span>, <span className="text-white">velocity</span>, and parameters <span className="text-white">a</span> to <span className="text-white">d</span>.
+                  </div>
+                  <div className="text-sm leading-6 text-slate-300">
+                    Good starting points: <span className="text-white">sin(x)</span>, <span className="text-white">sin(a*x) + 0.2*sin(3*x)</span>, <span className="text-white">tanh(sin(x) + 0.5*sin(2*x))</span>.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="border-t border-slate-600/70 px-5 py-4 bg-[#1a242b]">
+              <div className="flex items-center gap-2 text-sm text-slate-400 mb-3">
+                <Piano className="w-4 h-4" />
+                Test keyboard — C3 to B4
+              </div>
+              <PianoKeyboard activeNotes={activeNotes} onNoteOn={noteOn} onNoteOff={noteOff} />
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+    </div>
+  );
+}
