@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from "react";
 import { T } from "../../engine/themes.js";
+import { midiToFreq } from "../../engine/types.js";
 
 export function Oscilloscope({ analyserRef, heldNotesRef, audioCtxRef }) {
   const canvasRef = useRef(null);
@@ -30,13 +31,11 @@ export function Oscilloscope({ analyserRef, heldNotesRef, audioCtxRef }) {
 
       let periodSamples = bufLen;
       const sr = audioCtxRef.current ? audioCtxRef.current.sampleRate : 44100;
-      const voices = heldNotesRef.current;
-      if (voices && voices.size > 0) {
-        let lowestFreq = Infinity;
-        for (const [, v] of voices) {
-          if (v.freq < lowestFreq && v.stage !== "release") lowestFreq = v.freq;
-        }
-        if (lowestFreq < Infinity && lowestFreq > 0) {
+      const notes = heldNotesRef.current;
+      if (notes && notes.size > 0) {
+        const lowestNote = Math.min(...notes);
+        const lowestFreq = midiToFreq(lowestNote);
+        if (lowestFreq > 0) {
           periodSamples = Math.round(sr / lowestFreq);
         }
       }

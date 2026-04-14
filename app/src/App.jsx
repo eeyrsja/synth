@@ -7,9 +7,14 @@ import {
   withFxDefaults, clamp, midiToFreq, noteName,
 } from "./engine/types.js";
 import { T } from "./engine/themes.js";
-import { compileEquation, buildSample } from "./engine/equation.js";
-import { generateIR, createEffectsChain, rewireFxChain, syncFxParams, updateReverbDecay } from "./engine/effects.js";
+import { compileEquation } from "./engine/equation.js";
+import { rewireFxChain, syncFxParams, updateReverbDecay } from "./engine/effects.js";
 import { lfoSample } from "./engine/lfo.js";
+import {
+  createEngineRefs, setupAudio as engineSetupAudio,
+  noteOn as engineNoteOn, noteOff as engineNoteOff, panic as enginePanic,
+  sendParams, sendScale, sendAdsr, sendEquation, sendDrawnWave,
+} from "./engine/synth-engine.js";
 
 // ── Presets ─────────────────────────────────────────────────────────
 import { PRESETS } from "./presets/synth-presets.js";
@@ -224,13 +229,16 @@ export default function GraphingCalculatorSynthApp() {
   };
 
   const loadUserPreset = (p) => {
+    const engine = engineRef.current;
     if (p.drawnWave) {
       drawnWaveRef.current = new Float32Array(p.drawnWave);
       setEquationInput("[drawn wave]"); setEquation("[drawn wave]");
+      if (engine) sendDrawnWave(engine, p.drawnWave);
     } else {
       drawnWaveRef.current = null;
       setEquationInput(p.eq); setEquation(p.eq); lastEquationRef.current = p.eq;
       compileEquation(p.eq);
+      if (engine) { sendEquation(engine, p.eq); sendDrawnWave(engine, null); }
     }
     setA(p.a); setB(p.b); setC(p.c); setD(p.d);
     if (p.xScale != null) setXScale(p.xScale);
@@ -272,12 +280,11 @@ export default function GraphingCalculatorSynthApp() {
   const recStateRef = useRef("idle");
 
   // ── Audio refs ────────────────────────────────────────────────────
+  const engineRef = useRef(null);
   const audioCtxRef = useRef(null);
-  const processorRef = useRef(null);
   const gainRef = useRef(null);
   const midiAccessRef = useRef(null);
-  const heldNotesRef = useRef(new Map());
-  const phaseRef = useRef(new Map());
+  const heldNotesRef = useRef(new Set());
   const lastEquationRef = useRef(DEFAULT_EQ);
   const fxNodesRef = useRef(null);
   const filterNodeRef = useRef(null);
@@ -286,15 +293,6 @@ export default function GraphingCalculatorSynthApp() {
   const reverbDecayRef = useRef(2.0);
 
   const params = useMemo(() => ({ a, b, c, d }), [a, b, c, d]);
-
-  const paramsRef = useRef({ a, b, c, d });
-  paramsRef.current = { a, b, c, d };
-
-  const scaleRef = useRef({ x: xScale, y: yScale });
-  scaleRef.current = { x: xScale, y: yScale };
-
-  const adsrRef = useRef(adsr);
-  adsrRef.current = adsr;
 
   // ── Audio engine ──────────────────────────────────────────────────
   const audioStartingRef = useRef(false);
@@ -307,127 +305,56 @@ export default function GraphingCalculatorSynthApp() {
     if (audioStartingRef.current) return;
     audioStartingRef.current = true;
     try {
-      const Ctor = window.AudioContext || window.webkitAudioContext;
-      const ctx = new Ctor();
-      const gain = ctx.createGain();
-      gain.gain.value = masterVolume;
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.8;
-      gain.connect(analyser);
-      analyser.connect(ctx.destination);
-      analyserRef.current = analyser;
+      if (!engineRef.current) {
+        engineRef.current = createEngineRefs();
+      }
+      const engine = engineRef.current;
 
-      // Create effects chain using extracted module
-      const fxNodes = createEffectsChain(ctx);
-      fxNodesRef.current = fxNodes;
+      const ctx = await engineSetupAudio(engine, {
+        masterVolume,
+        fxOrder,
+        adsr: { ...adsr },
+        params: { a, b, c, d },
+        scale: { x: xScale, y: yScale },
+        onReady: () => setAudioReady(true),
+        onSampleRate: (sr) => setSampleRate(sr),
+      });
 
-      // Voice filter
-      const voiceFilter = ctx.createBiquadFilter();
-      voiceFilter.type = "allpass";
-      voiceFilter.frequency.value = 18000;
-      voiceFilter.Q.value = 0.7;
-      filterNodeRef.current = voiceFilter;
+      if (!ctx) return;
 
-      // Wire effects chain
-      rewireFxChain(fxNodes, fxOrder, gain, voiceFilter);
+      // Store node refs for effects/LFO/visualizer access
+      audioCtxRef.current = engine.audioCtx;
+      gainRef.current = engine.gain;
+      analyserRef.current = engine.analyser;
+      fxNodesRef.current = engine.fxNodes;
+      filterNodeRef.current = engine.filterNode;
 
-      // ScriptProcessor for synthesis
-      const processor = ctx.createScriptProcessor(2048, 0, 1);
-      const smoothParams = { a: 1, b: 0, c: 0, d: 0 };
-      const paramSmooth = 0.999;
-      processor.onaudioprocess = (ev) => {
-        const out = ev.outputBuffer.getChannelData(0);
-        const notes = Array.from(heldNotesRef.current.entries());
-        for (let i = 0; i < out.length; i++) {
-          const targetParams = paramsRef.current;
-          smoothParams.a += (targetParams.a - smoothParams.a) * (1 - paramSmooth);
-          smoothParams.b += (targetParams.b - smoothParams.b) * (1 - paramSmooth);
-          smoothParams.c += (targetParams.c - smoothParams.c) * (1 - paramSmooth);
-          smoothParams.d += (targetParams.d - smoothParams.d) * (1 - paramSmooth);
-          if (!notes.length) { out[i] = 0; continue; }
-          let mix = 0;
-          for (const [, ns] of notes) {
-            if (ns.currentVelocity === undefined) ns.currentVelocity = ns.velocity;
-            else ns.currentVelocity += (ns.velocity - ns.currentVelocity) * 0.01;
-
-            const { attack, decay, sustain } = adsrRef.current;
-            if (ns.stage === "attack") {
-              const attackStep = 1 / Math.max(1, attack * ctx.sampleRate);
-              ns.envGain = Math.min(1, ns.envGain + attackStep);
-              if (ns.envGain >= 0.999) ns.stage = "decay";
-            } else if (ns.stage === "decay") {
-              const decayStep = (1 - sustain) / Math.max(1, decay * ctx.sampleRate);
-              ns.envGain = Math.max(sustain, ns.envGain - decayStep);
-              if (ns.envGain <= sustain + 0.0001) ns.stage = "sustain";
-            } else if (ns.stage === "sustain") {
-              ns.envGain = sustain;
-            } else if (ns.stage === "release") {
-              ns.envGain = Math.max(0, ns.envGain - ns.releaseStep);
-            }
-            if (ns.envGain <= 0 && ns.stage === "release") continue;
-            const p = phaseRef.current.get(ns.note) || 0;
-            mix += buildSample(p / ctx.sampleRate, ns.freq, ns.currentVelocity, ns.note, smoothParams, scaleRef.current, drawnWaveRef.current) * 0.28 * ns.envGain * ns.currentVelocity;
-            phaseRef.current.set(ns.note, p + 1);
-          }
-          out[i] = Math.tanh(mix);
-        }
-        for (const [key, ns] of notes) {
-          if (ns.stage === "release" && ns.envGain <= 0) {
-            heldNotesRef.current.delete(key);
-            phaseRef.current.delete(key);
-          }
-        }
-      };
-      processor.connect(voiceFilter);
-
-      audioCtxRef.current = ctx;
-      processorRef.current = processor;
-      gainRef.current = gain;
-      setAudioReady(true);
-      setSampleRate(ctx.sampleRate);
+      // Send current equation to worklet
+      const eqStr = drawnWaveRef.current ? null : lastEquationRef.current;
+      if (eqStr) sendEquation(engine, eqStr);
+      if (drawnWaveRef.current) sendDrawnWave(engine, drawnWaveRef.current);
     } finally {
       audioStartingRef.current = false;
     }
   };
 
   const refreshActiveNotes = () => {
-    setActiveNotes(
-      [...heldNotesRef.current.entries()]
-        .filter(([, voice]) => voice.stage !== "release")
-        .map(([note]) => note)
-        .sort((left, right) => left - right)
-    );
+    const engine = engineRef.current;
+    if (!engine) { setActiveNotes([]); return; }
+    setActiveNotes([...engine.heldNotes].sort((left, right) => left - right));
   };
 
   const noteOn = async (note, velocity = 0.8) => {
     if (!audioCtxRef.current) await setupAudio();
     else if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume();
-    const existing = heldNotesRef.current.get(note);
-    if (existing) {
-      existing.velocity = velocity;
-      existing.stage = "attack";
-      existing.releaseStep = 0;
-    } else {
-      heldNotesRef.current.set(note, {
-        note, velocity,
-        freq: midiToFreq(note),
-        envGain: 0, stage: "attack", releaseStep: 0,
-      });
-      if (!phaseRef.current.has(note)) phaseRef.current.set(note, 0);
-    }
+    const engine = engineRef.current;
+    if (engine) engineNoteOn(engine, note, velocity);
     refreshActiveNotes();
   };
 
   const noteOff = (note) => {
-    const ns = heldNotesRef.current.get(note);
-    if (ns) {
-      ns.stage = "release";
-      ns.releaseStep = Math.max(
-        ns.envGain / Math.max(1, adsrRef.current.release * (audioCtxRef.current?.sampleRate || 44100)),
-        1e-5
-      );
-    }
+    const engine = engineRef.current;
+    if (engine) engineNoteOff(engine, note);
     refreshActiveNotes();
   };
 
@@ -495,12 +422,16 @@ export default function GraphingCalculatorSynthApp() {
         mods[l.target] += val * l.depth;
       }
       if (!anyActive) return;
-      paramsRef.current = {
-        a: bases.a + mods.a,
-        b: bases.b + mods.b,
-        c: bases.c + mods.c,
-        d: bases.d + mods.d,
-      };
+      // Send LFO-modulated params to worklet
+      const engine = engineRef.current;
+      if (engine) {
+        sendParams(engine, {
+          a: bases.a + mods.a,
+          b: bases.b + mods.b,
+          c: bases.c + mods.c,
+          d: bases.d + mods.d,
+        });
+      }
       const ctx = audioCtxRef.current;
       const t = ctx ? ctx.currentTime : 0;
       const filterNode = filterNodeRef.current;
@@ -523,8 +454,21 @@ export default function GraphingCalculatorSynthApp() {
 
   useEffect(() => {
     lfoBaseRef.current = { a, b, c, d, cutoff: filter.cutoff, resonance: filter.resonance, volume: masterVolume };
-    paramsRef.current = { a, b, c, d };
+    // Send base params to worklet when they change (no LFO active = direct update)
+    const engine = engineRef.current;
+    if (engine) sendParams(engine, { a, b, c, d });
   }, [a, b, c, d, filter.cutoff, filter.resonance, masterVolume]);
+
+  // ── Send scale/adsr to worklet on changes ─────────────────────────
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (engine) sendScale(engine, xScale, yScale);
+  }, [xScale, yScale]);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (engine) sendAdsr(engine, adsr);
+  }, [adsr]);
 
   // ── MIDI ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -564,8 +508,25 @@ export default function GraphingCalculatorSynthApp() {
     return () => { alive = false; };
   }, []);
 
-  const applyEquation = () => { drawnWaveRef.current = null; lastEquationRef.current = equationInput; compileEquation(equationInput); setEquation(equationInput); };
-  const panic = () => { heldNotesRef.current.clear(); phaseRef.current.clear(); realNotesRef.current.clear(); seventhNoteRef.current = null; setActiveNotes([]); };
+  const applyEquation = () => {
+    drawnWaveRef.current = null;
+    lastEquationRef.current = equationInput;
+    compileEquation(equationInput);
+    setEquation(equationInput);
+    // Send transpiled equation to worklet
+    const engine = engineRef.current;
+    if (engine) {
+      sendEquation(engine, equationInput);
+      sendDrawnWave(engine, null);
+    }
+  };
+  const panic = () => {
+    const engine = engineRef.current;
+    if (engine) enginePanic(engine);
+    realNotesRef.current.clear();
+    seventhNoteRef.current = null;
+    setActiveNotes([]);
+  };
 
   // ── Recording / Playback / Loop ─────────────────────────────────
   const startRecording = async () => {
@@ -644,9 +605,7 @@ export default function GraphingCalculatorSynthApp() {
     if (cur === target) return;
     if (cur !== null && !realNotesRef.current.has(cur)) { recNoteOff(cur); noteOff(cur); }
     if (target !== null && !realNotesRef.current.has(target)) {
-      const lowest = Math.min(...realNotesRef.current);
-      const v = heldNotesRef.current.get(lowest);
-      recNoteOn(target); noteOn(target, (v ? v.velocity : 0.8) * 0.7);
+      recNoteOn(target); noteOn(target, 0.7 * 0.8);
     }
     seventhNoteRef.current = target;
   };
@@ -790,6 +749,12 @@ export default function GraphingCalculatorSynthApp() {
     if (p.lfos) setLfos(JSON.parse(JSON.stringify(p.lfos)));
     if (p.masterVolume != null) setMasterVolume(p.masterVolume);
     if (p.add7th != null) setAdd7th(p.add7th);
+    // Send to worklet
+    const engine = engineRef.current;
+    if (engine) {
+      sendEquation(engine, p.eq);
+      sendDrawnWave(engine, null);
+    }
   };
 
   const updateFx = (effect, key, val) => {
@@ -801,6 +766,9 @@ export default function GraphingCalculatorSynthApp() {
     setEquationInput("[drawn wave]");
     setEquation("[drawn wave]");
     setPage("synth");
+    // Send drawn wave to worklet
+    const engine = engineRef.current;
+    if (engine) sendDrawnWave(engine, wave);
   }, []);
 
   const toggleDrumSync = useCallback(async () => {

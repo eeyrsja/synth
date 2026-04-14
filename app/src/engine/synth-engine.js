@@ -1,5 +1,8 @@
-import { midiToFreq } from "./types.js";
 import { createEffectsChain, rewireFxChain } from "./effects.js";
+import { transpileEquation } from "./equation-transpiler.js";
+
+// Resolve worklet URL at import time — Vite emits this as a separate asset
+const workletUrl = new URL("./worklet/synth-processor.js", import.meta.url);
 
 /**
  * Audio engine state — holds all Web Audio API node references.
@@ -8,31 +11,40 @@ import { createEffectsChain, rewireFxChain } from "./effects.js";
 export function createEngineRefs() {
   return {
     audioCtx: null,
-    processor: null,
+    workletNode: null,
     gain: null,
     analyser: null,
     fxNodes: null,
     filterNode: null,
-    heldNotes: new Map(),
-    phases: new Map(),
     midiAccess: null,
     drawnWave: null,
     reverbDecay: 2.0,
     starting: false,
+    /** Track held notes on main thread for UI (activeNotes display) */
+    heldNotes: new Set(),
   };
 }
 
 /**
- * Set up the full audio engine: AudioContext, ScriptProcessorNode,
+ * Post a message to the AudioWorklet processor.
+ * @param {object} engine
+ * @param {object} msg
+ */
+function postToWorklet(engine, msg) {
+  engine.workletNode?.port.postMessage(msg);
+}
+
+/**
+ * Set up the full audio engine: AudioContext, AudioWorkletNode,
  * effects chain, filter, analyser, gain.
  *
  * @param {object} engine - Engine refs object from createEngineRefs()
  * @param {object} options - Configuration
  * @param {number} options.masterVolume - Initial master volume
  * @param {string[]} options.fxOrder - Effect chain order
- * @param {Function} options.buildSample - Sample builder function
- * @param {{ current: object }} options.adsrRef - Ref to current ADSR config
- * @param {{ current: object }} options.paramsRef - Ref to current params {a,b,c,d}
+ * @param {{ attack:number, decay:number, sustain:number, release:number }} options.adsr - Initial ADSR
+ * @param {{ a:number, b:number, c:number, d:number }} options.params - Initial equation params
+ * @param {{ x:number, y:number }} options.scale - Initial scale factors
  * @param {Function} options.onReady - Callback when audio is ready
  * @param {Function} options.onSampleRate - Callback with sample rate
  * @returns {Promise<object>} The audio context
@@ -50,6 +62,9 @@ export async function setupAudio(engine, options) {
   try {
     const Ctor = window.AudioContext || window.webkitAudioContext;
     const ctx = new Ctor();
+
+    // Register the AudioWorklet processor module
+    await ctx.audioWorklet.addModule(workletUrl);
 
     const gain = ctx.createGain();
     gain.gain.value = options.masterVolume;
@@ -72,67 +87,30 @@ export async function setupAudio(engine, options) {
     // Wire effects chain
     rewireFxChain(fxNodes, options.fxOrder, gain, voiceFilter);
 
-    // Create ScriptProcessorNode
-    const processor = ctx.createScriptProcessor(2048, 0, 1);
-    const smoothParams = { a: 1, b: 0, c: 0, d: 0 };
-    const paramSmooth = 0.999;
+    // Create AudioWorkletNode (stereo output)
+    const workletNode = new AudioWorkletNode(ctx, "synth-processor", {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+    });
 
-    processor.onaudioprocess = (ev) => {
-      const out = ev.outputBuffer.getChannelData(0);
-      const notes = Array.from(engine.heldNotes.entries());
+    workletNode.connect(voiceFilter);
 
-      for (let i = 0; i < out.length; i++) {
-        const targetParams = options.paramsRef.current;
-        smoothParams.a += (targetParams.a - smoothParams.a) * (1 - paramSmooth);
-        smoothParams.b += (targetParams.b - smoothParams.b) * (1 - paramSmooth);
-        smoothParams.c += (targetParams.c - smoothParams.c) * (1 - paramSmooth);
-        smoothParams.d += (targetParams.d - smoothParams.d) * (1 - paramSmooth);
-
-        if (!notes.length) { out[i] = 0; continue; }
-
-        let mix = 0;
-        for (const [, ns] of notes) {
-          if (ns.currentVelocity === undefined) ns.currentVelocity = ns.velocity;
-          else ns.currentVelocity += (ns.velocity - ns.currentVelocity) * 0.01;
-
-          const { attack, decay, sustain } = options.adsrRef.current;
-          if (ns.stage === "attack") {
-            const attackStep = 1 / Math.max(1, attack * ctx.sampleRate);
-            ns.envGain = Math.min(1, ns.envGain + attackStep);
-            if (ns.envGain >= 0.999) ns.stage = "decay";
-          } else if (ns.stage === "decay") {
-            const decayStep = (1 - sustain) / Math.max(1, decay * ctx.sampleRate);
-            ns.envGain = Math.max(sustain, ns.envGain - decayStep);
-            if (ns.envGain <= sustain + 0.0001) ns.stage = "sustain";
-          } else if (ns.stage === "sustain") {
-            ns.envGain = sustain;
-          } else if (ns.stage === "release") {
-            ns.envGain = Math.max(0, ns.envGain - ns.releaseStep);
-          }
-
-          if (ns.envGain <= 0 && ns.stage === "release") continue;
-
-          const p = engine.phases.get(ns.note) || 0;
-          mix += options.buildSample(p / ctx.sampleRate, ns.freq, ns.currentVelocity, ns.note, smoothParams) * 0.28 * ns.envGain * ns.currentVelocity;
-          engine.phases.set(ns.note, p + 1);
-        }
-        out[i] = Math.tanh(mix);
-      }
-
-      // Clean up finished release envelopes
-      for (const [key, ns] of notes) {
-        if (ns.stage === "release" && ns.envGain <= 0) {
-          engine.heldNotes.delete(key);
-          engine.phases.delete(key);
-        }
-      }
-    };
-
-    processor.connect(voiceFilter);
+    // Send initial parameters to the worklet
+    const port = workletNode.port;
+    if (options.params) {
+      port.postMessage({ type: "params", ...options.params });
+    }
+    if (options.scale) {
+      port.postMessage({ type: "scale", x: options.scale.x, y: options.scale.y });
+    }
+    if (options.adsr) {
+      port.postMessage({ type: "adsr", ...options.adsr });
+    }
 
     // Store refs
     engine.audioCtx = ctx;
-    engine.processor = processor;
+    engine.workletNode = workletNode;
     engine.gain = gain;
     engine.analyser = analyser;
     engine.fxNodes = fxNodes;
@@ -148,73 +126,79 @@ export async function setupAudio(engine, options) {
 }
 
 /**
- * Trigger a note on.
+ * Send updated equation params (a,b,c,d) to the worklet.
+ */
+export function sendParams(engine, params) {
+  postToWorklet(engine, { type: "params", a: params.a, b: params.b, c: params.c, d: params.d });
+}
+
+/**
+ * Send updated scale factors to the worklet.
+ */
+export function sendScale(engine, x, y) {
+  postToWorklet(engine, { type: "scale", x, y });
+}
+
+/**
+ * Send updated ADSR envelope to the worklet.
+ */
+export function sendAdsr(engine, adsr) {
+  postToWorklet(engine, { type: "adsr", attack: adsr.attack, decay: adsr.decay, sustain: adsr.sustain, release: adsr.release });
+}
+
+/**
+ * Transpile and send an equation to the worklet.
+ * Returns true if transpilation succeeded.
+ */
+export function sendEquation(engine, eqString) {
+  const result = transpileEquation(eqString);
+  if (result.ok) {
+    postToWorklet(engine, { type: "equation", body: result.body });
+  } else {
+    // Fallback to default sin(x) on transpilation failure
+    postToWorklet(engine, { type: "equation", body: null });
+  }
+  return result.ok;
+}
+
+/**
+ * Send drawn wavetable data to the worklet.
+ */
+export function sendDrawnWave(engine, wave) {
+  if (wave) {
+    postToWorklet(engine, { type: "drawnWave", wave: Array.from(wave) });
+  } else {
+    postToWorklet(engine, { type: "drawnWave", wave: null });
+  }
+}
+
+/**
+ * Trigger a note on — sends to worklet and tracks on main thread.
  */
 export function noteOn(engine, note, velocity = 0.8) {
-  const existing = engine.heldNotes.get(note);
-  if (existing) {
-    existing.velocity = velocity;
-    existing.stage = "attack";
-    existing.releaseStep = 0;
-  } else {
-    engine.heldNotes.set(note, {
-      note,
-      velocity,
-      freq: midiToFreq(note),
-      envGain: 0,
-      stage: "attack",
-      releaseStep: 0,
-    });
-    if (!engine.phases.has(note)) engine.phases.set(note, 0);
-  }
+  postToWorklet(engine, { type: "noteOn", note, velocity });
+  engine.heldNotes.add(note);
 }
 
 /**
- * Trigger a note off (start release).
+ * Trigger a note off — sends to worklet and tracks on main thread.
  */
 export function noteOff(engine, note) {
-  const ns = engine.heldNotes.get(note);
-  if (ns) {
-    ns.stage = "release";
-    const sampleRate = engine.audioCtx?.sampleRate || 44100;
-    // adsrRef is accessed via the options passed to setupAudio, but we read release from the voice
-    // For now, we need the ADSR release value. The caller should pass it or we store it on engine.
-    ns.releaseStep = Math.max(
-      ns.envGain / Math.max(1, 0.22 * sampleRate),
-      1e-5
-    );
-  }
-}
-
-/**
- * Note off with explicit release time.
- */
-export function noteOffWithRelease(engine, note, releaseTime) {
-  const ns = engine.heldNotes.get(note);
-  if (ns) {
-    ns.stage = "release";
-    const sampleRate = engine.audioCtx?.sampleRate || 44100;
-    ns.releaseStep = Math.max(
-      ns.envGain / Math.max(1, releaseTime * sampleRate),
-      1e-5
-    );
-  }
+  postToWorklet(engine, { type: "noteOff", note });
+  engine.heldNotes.delete(note);
 }
 
 /**
  * Panic — kill all notes.
  */
 export function panic(engine) {
+  postToWorklet(engine, { type: "panic" });
   engine.heldNotes.clear();
-  engine.phases.clear();
 }
 
 /**
- * Get list of currently active (non-release) note numbers.
+ * Get list of currently active note numbers (main-thread tracking).
  */
 export function getActiveNotes(engine) {
-  return [...engine.heldNotes.entries()]
-    .filter(([, voice]) => voice.stage !== "release")
-    .map(([note]) => note)
-    .sort((a, b) => a - b);
+  return [...engine.heldNotes].sort((a, b) => a - b);
 }
