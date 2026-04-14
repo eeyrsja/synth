@@ -1,0 +1,4 @@
+start-dev.ps1
+wavecraft.db
+wavecraft.db-shm
+wavecraft.db-wal

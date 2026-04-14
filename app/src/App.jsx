@@ -1004,7 +1004,7 @@ export default function GraphingCalculatorSynthApp() {
                   border: "1px solid #22cc44", borderRadius: 2, cursor: "pointer",
                   background: "linear-gradient(180deg, #1a4d1a, #0d260d)", color: T.green,
                   boxShadow: "0 0 8px rgba(34,204,68,0.3)",
-                }}>Upgrade — $2</button>
+                }}>Upgrade for £2</button>
               )}
               <button onClick={doLogout} style={{
                 height: 24, padding: "0 10px", fontSize: 9, fontWeight: 700,
@@ -1038,7 +1038,7 @@ export default function GraphingCalculatorSynthApp() {
           fontSize: 12, fontWeight: 700, fontFamily: T.font, letterSpacing: 1,
           boxShadow: `0 4px 20px rgba(0,0,0,0.5)`,
         }}>
-          {paymentStatus === "success" ? "Payment successful — you're now upgraded!" : "Payment cancelled"}
+          {paymentStatus === "success" ? "Payment successful — you're now upgraded!" : paymentStatus === "error" ? "Payments not configured yet" : "Payment cancelled"}
           <button onClick={() => setPaymentStatus(null)} style={{
             marginLeft: 16, background: "none", border: "none", color: T.textMuted,
             cursor: "pointer", fontSize: 14, lineHeight: 1,
