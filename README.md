@@ -52,18 +52,29 @@ If you just want a fast win, start with one of the built-in presets and then mut
 
 ## Equation Cheatsheet
 
+
 WaveCraft evaluates your expression for every sample it generates. The useful variables are:
 
-- `x`: waveform phase input
+- `x`: waveform phase input (0 to 2π per cycle)
 - `t`: elapsed time for the current note, in seconds
 - `freq`: note frequency in Hz
 - `note`: MIDI note number
 - `velocity`: note velocity from `0` to `1`
-- `a`, `b`, `c`, `d`: live parameter knobs
+- `a`, `b`, `c`, `d`: live parameter knobs (controllable in real time)
 - `pi`, `e`: math constants
 
-Some good starters:
+**Modulation & Effects:**
+- LFOs can modulate: `a`, `b`, `c`, `d`, filter cutoff, resonance, and volume
+- Filter types: Bypass, Low-Pass, High-Pass, Band-Pass
+- Effects chain: Distortion, Chorus, Delay, Reverb (all with tweakable parameters)
 
+**Draw Mode:**
+- Draw your own 256-sample wavetable for custom oscillator shapes
+
+**Export:**
+- Exported audio is `.webm` (not `.wav`)
+
+**Example Equations:**
 ```txt
 sin(x)
 sin(x + a*sin(b*x))
@@ -72,10 +83,17 @@ sin(x) * exp(-0.001*t)
 sin(a*x) * cos(b*x) + c*sin(d*x)
 ```
 
-Two controls matter more than they first appear:
+**Controls:**
+- `X Scale`: Stretches the phase input, changing the visual and harmonic shape of the oscillator
+- `Y Scale`: Boosts the waveform before soft clipping (adds aggression)
 
-- `X Scale` stretches the phase input, which changes the visual and harmonic shape of the oscillator.
-- `Y Scale` boosts the waveform before soft clipping, which makes it a quick way to add aggression.
+**UI:**
+- Tabs for Synth, Draw, and Drums (all modules stay loaded in the background)
+- Presets, keyboard, visualizers (oscilloscope, spectrum), and effects chain
+
+**Tech Notes:**
+- Uses `ScriptProcessorNode` for audio (upgrade to `AudioWorklet` recommended for production)
+- MIDI support depends on browser support and permissions
 
 ## How It Works
 

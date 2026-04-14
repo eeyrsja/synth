@@ -97,3 +97,112 @@ body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
 }
+
+/* Industrial Hardware Module */
+.hardware-module {
+  background: #222222;
+  background-image: 
+    linear-gradient(45deg, #1f1f1f 25%, transparent 25%, transparent 75%, #1f1f1f 75%, #1f1f1f),
+    linear-gradient(45deg, #1f1f1f 25%, transparent 25%, transparent 75%, #1f1f1f 75%, #1f1f1f);
+  background-size: 4px 4px;
+  background-position: 0 0, 2px 2px;
+  border-top: 2px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 4px solid #000;
+  box-shadow: inset 0 10px 20px -10px rgba(0,0,0,0.8), 0 20px 20px -20px black;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+}
+
+.hardware-module::before {
+  content: '';
+  position: absolute;
+  top: 10px; left: 10px; right: 10px; bottom: 10px;
+  border: 1px solid rgba(0,0,0,0.4);
+  pointer-events: none;
+}
+
+/* Photorealistic Knob Base */
+.knob-3d {
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(100% 100% at 30% 30%, #444, #111) !important;
+  box-shadow: 
+    inset 0 1px 1px rgba(255,255,255,0.3) !important,
+    inset 0 -1px 2px rgba(0,0,0,0.8) !important,
+    0 5px 10px rgba(0,0,0,0.8) !important,
+    0 1px 2px rgba(0,0,0,0.5) !important;
+  position: relative;
+}
+.knob-3d-tick {
+  position: absolute;
+  top: 10%; left: 50%;
+  transform: translateX(-50%);
+  width: 10%; height: 30%;
+  background: #ff3300;
+  border-radius: 1px;
+  box-shadow: inset 0 1px 1px rgba(0,0,0,0.5);
+}
+
+/* CRT Screen styling */
+.crt-screen {
+  position: relative;
+  border-radius: 8px;
+  box-shadow: 
+    inset 0 0 15px rgba(0,0,0,1),
+    0 0 0 4px #1a1a1a,
+    0 0 0 6px #333;
+  overflow: hidden;
+  background: #050505;
+}
+.crt-screen::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 40%, rgba(255,255,255,0) 100%);
+  pointer-events: none;
+  z-index: 10;
+}
+.crt-screen::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0,0,0,0.1),
+    rgba(0,0,0,0.1) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+  z-index: 11;
+}
+
+/* Toggle Switch */
+.toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 60px;
+  background: #111;
+  border-radius: 4px;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.8), 0 1px 1px rgba(255,255,255,0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.toggle-switch::before {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 38px;
+  background: linear-gradient(180deg, #ccc, #888);
+  border-radius: 2px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.8), inset 0 2px 2px rgba(255,255,255,0.6);
+  transition: transform 0.1s cubic-bezier(0.4, 0.0, 0.2, 1);
+  transform: translateY(-8px);
+}
+.toggle-switch.is-on::before {
+  transform: translateY(8px) scaleY(-1);
+  box-shadow: 0 -4px 6px rgba(0,0,0,0.8), inset 0 2px 2px rgba(255,255,255,0.6);
+}

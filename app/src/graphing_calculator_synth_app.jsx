@@ -108,33 +108,91 @@ function generateIR(ctx, decay) {
 }
 
 // ─── Theme ── Retro Analog ───────────────────────────────────────────
-const T = {
-  bg:         "#0d0b08",
-  surface:    "#1a1510",
-  surfaceAlt: "#211c14",
-  raised:     "#2e2820",
-  border:     "rgba(255,180,60,0.12)",
-  borderHi:   "rgba(255,180,60,0.25)",
-  text:       "#e8d5b0",
-  textDim:    "#9a8560",
-  textMuted:  "#6b5a3e",
-  accent:     "#e8850c",
-  accentGlow: "rgba(232,133,12,0.35)",
-  accentSoft: "rgba(232,133,12,0.15)",
-  green:      "#33ff66",
-  greenGlow:  "rgba(51,255,102,0.3)",
-  greenDark:  "#20cc44",
-  red:        "#cc3300",
-  amber:      "#ffaa00",
-  white:      "#f0e6d2",
-  plotBg:     "#080c08",
-  plotLine:   "#33ff66",
-  plotAxis:   "#1a3a1a",
-  plotGrid:   "#0f1f0f",
-  radius:     3,
-  radiusLg:   5,
-  font:       "'Share Tech Mono', 'Courier New', monospace",
+const THEMES = {
+  industrial: {
+    bg:         "#111111",      // Deepest shadow
+    surface:    "#222222",      // Raw metal panel
+    surfaceAlt: "#2a2a2a",      // Raised module area
+    raised:     "#333333",      // Slightly lighter metal
+    border:     "rgba(0,0,0,0.8)",    // Heavy black seams
+    borderHi:   "rgba(255,255,255,0.08)", // Metal reflections/highlights
+    text:       "#f0f0f0",      // Hard white text
+    textDim:    "#999999",      // Muted info
+    textMuted:  "#555555",
+    accent:     "#ff3300",      // Danger Red
+    accentGlow: "rgba(255,51,0,0.6)",
+    accentSoft: "rgba(255,51,0,0.15)",
+    green:      "#00e676",      // LED Green
+    greenGlow:  "rgba(0,230,118,0.5)",
+    greenDark:  "#00994d",
+    red:        "#ff3300",
+    amber:      "#ffaa00",
+    white:      "#ffffff",
+    plotBg:     "#050505",      // CRT Off
+    plotLine:   "#00e676",
+    plotAxis:   "#004422",
+    plotGrid:   "#002211",
+    radius:     2,
+    radiusLg:   4,
+    font:       "'Helvetica Neue', Helvetica, Arial, sans-serif",
+  },
+  retro: {
+    bg:         "#0d0b08",
+    surface:    "#1a1510",
+    surfaceAlt: "#211c14",
+    raised:     "#2e2820",
+    border:     "rgba(255,180,60,0.12)",
+    borderHi:   "rgba(255,180,60,0.25)",
+    text:       "#e8d5b0",
+    textDim:    "#9a8560",
+    textMuted:  "#6b5a3e",
+    accent:     "#e8850c",
+    accentGlow: "rgba(232,133,12,0.35)",
+    accentSoft: "rgba(232,133,12,0.15)",
+    green:      "#33ff66",
+    greenGlow:  "rgba(51,255,102,0.3)",
+    greenDark:  "#20cc44",
+    red:        "#cc3300",
+    amber:      "#ffaa00",
+    white:      "#f0e6d2",
+    plotBg:     "#080c08",
+    plotLine:   "#33ff66",
+    plotAxis:   "#1a3a1a",
+    plotGrid:   "#0f1f0f",
+    radius:     3,
+    radiusLg:   5,
+    font:       "'Share Tech Mono', 'Courier New', monospace",
+  },
+  neon: {
+    bg:         "#050510",
+    surface:    "#0a0a20",
+    surfaceAlt: "#101030",
+    raised:     "#151540",
+    border:     "rgba(200,0,255,0.4)",
+    borderHi:   "rgba(255,0,255,0.6)",
+    text:       "#ffccff",
+    textDim:    "#cc99ff",
+    textMuted:  "#9966cc",
+    accent:     "#00ffff",
+    accentGlow: "rgba(0,255,255,0.6)",
+    accentSoft: "rgba(0,255,255,0.15)",
+    green:      "#ff00ff",
+    greenGlow:  "rgba(255,0,255,0.5)",
+    greenDark:  "#cc00cc",
+    red:        "#ff0066",
+    amber:      "#ffcc00",
+    white:      "#ffffff",
+    plotBg:     "#00000a",
+    plotLine:   "#00ffff",
+    plotAxis:   "#330066",
+    plotGrid:   "#1f004d",
+    radius:     0,
+    radiusLg:   0,
+    font:       "'Courier New', monospace",
+  }
 };
+
+let T = { ...THEMES.industrial };
 
 // CRT scanline overlay CSS injected once
 if (typeof document !== "undefined" && !document.getElementById("crt-style")) {
@@ -335,24 +393,35 @@ function RotaryKnob({ label, value, onChange, min = 0, max = 1, step = 0.01, siz
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-      <svg width={size} height={size} style={{ cursor: "grab", touchAction: "none" }} onPointerDown={onDown}>
-        <path d={arcD(-135, 135, tr)} fill="none" stroke={T.border} strokeWidth={2.5} strokeLinecap="round" />
-        {norm > 0.005 && <path d={arcD(-135, angle, tr)} fill="none" stroke={T.accent} strokeWidth={2.5} strokeLinecap="round" />}
-        {hasLfo && modAngle !== angle && (
-          <path
-            d={arcD(Math.min(angle, modAngle), Math.max(angle, modAngle), tr + 0.5)}
-            fill="none" stroke={T.accent} strokeWidth={5} strokeLinecap="round"
-            opacity={0.3}
-          />
-        )}
-        <circle cx={r} cy={r} r={ir} fill={T.raised} stroke={T.borderHi} strokeWidth={1} />
-        <line x1={r} y1={r} x2={px} y2={py} stroke={T.accent} strokeWidth={2} strokeLinecap="round" />
-        {hasLfo && (
-          <circle cx={mpx} cy={mpy} r={3} fill={T.accent} opacity={0.85}>
-            <animate attributeName="opacity" values="0.85;0.4;0.85" dur="0.6s" repeatCount="indefinite" />
-          </circle>
-        )}
-      </svg>
+      <div style={{ position: "relative", width: size, height: size, cursor: "grab", touchAction: "none" }} onPointerDown={onDown}>
+        <svg width={size} height={size} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}>
+          <path d={arcD(-135, 135, tr)} fill="none" stroke={T.border} strokeWidth={2.5} strokeLinecap="round" />
+          {norm > 0.005 && <path d={arcD(-135, angle, tr)} fill="none" stroke={T.accent} strokeWidth={2.5} strokeLinecap="round" />}
+          {hasLfo && modAngle !== angle && (
+            <path
+              d={arcD(Math.min(angle, modAngle), Math.max(angle, modAngle), tr + 0.5)}
+              fill="none" stroke={T.accent} strokeWidth={5} strokeLinecap="round"
+              opacity={0.3}
+            />
+          )}
+        </svg>
+        <div className="knob-3d" style={{
+          position: "absolute",
+          top: r - ir, left: r - ir,
+          width: ir * 2, height: ir * 2,
+          transform: `rotate(${angle}deg)`,
+          pointerEvents: "none"
+        }}>
+          <div className="knob-3d-tick" />
+        </div>
+        <svg width={size} height={size} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}>
+          {hasLfo && (
+            <circle cx={mpx} cy={mpy} r={3} fill={T.accent} opacity={0.85}>
+              <animate attributeName="opacity" values="0.85;0.4;0.85" dur="0.6s" repeatCount="indefinite" />
+            </circle>
+          )}
+        </svg>
+      </div>
       <span style={{ fontSize: 8, color: hasLfo ? T.accent : T.textDim, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, fontFamily: T.font }}>
         {label}{hasLfo ? " ●" : ""}
       </span>
@@ -1120,19 +1189,21 @@ function WaveDrawer({ onUseWave }) {
           <button style={btnAction} onClick={normalize}>Normalize</button>
           <button style={btnAction} onClick={clearWave}>Clear</button>
         </div>
-        <canvas
-          ref={canvasRef}
-          width={800}
-          height={300}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          style={{
-            width: "100%", height: 300, borderRadius: T.radius,
-            border: `1px solid ${T.border}`, cursor: "crosshair",
-            touchAction: "none",
-          }}
-        />
+        <div className="crt-screen" style={{ width: "100%", height: 300, cursor: "crosshair", borderRadius: T.radius }}>
+          <canvas
+            ref={canvasRef}
+            width={800}
+            height={300}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            style={{
+              width: "100%", height: "100%", borderRadius: T.radius,
+              border: `1px solid ${T.border}`,
+              touchAction: "none",
+            }}
+          />
+        </div>
       </Section>
 
       <Section title="Load Shape" icon="📐" style={{ marginTop: 12 }}>
@@ -2938,6 +3009,8 @@ export default function GraphingCalculatorSynthApp() {
   adsrRef.current = adsr;
 
   const buildSampleRef = useRef(null);
+  const eqScopeRef = useRef({ x: 0, t: 0, freq: 0, note: 0, velocity: 0, a: 0, b: 0, c: 0, d: 0, pi: Math.PI, e: Math.E });
+  
   buildSampleRef.current = (t, freq, velocity, note, smoothed) => {
     try {
       const { x: xs, y: ys } = scaleRef.current;
@@ -2956,28 +3029,33 @@ export default function GraphingCalculatorSynthApp() {
       const { a: pa, b: pb, c: pc, d: pd } = smoothed || paramsRef.current;
       const eq = compiledEqRef.current;
       if (!eq) return 0;
-      const raw = eq.evaluate({
-        x, t, freq, note, velocity,
-        a: pa, b: pb, c: pc, d: pd,
-        pi: Math.PI, e: Math.E,
-      });
+      
+      const scope = eqScopeRef.current;
+      scope.x = x; scope.t = t; scope.freq = freq; scope.note = note; scope.velocity = velocity;
+      scope.a = pa; scope.b = pb; scope.c = pc; scope.d = pd;
+      
+      const raw = eq.evaluate(scope);
       if (!Number.isFinite(raw)) return 0;
       return Math.tanh(raw * ys);
     } catch { return 0; }
   };
 
   // ── Audio engine ──────────────────────────────────────────────────
+  const audioStartingRef = useRef(false);
   const setupAudio = async () => {
     if (audioCtxRef.current) {
       await audioCtxRef.current.resume();
       setAudioReady(true);
       return;
     }
-    const Ctor = window.AudioContext || window.webkitAudioContext;
-    const ctx = new Ctor();
-    const gain = ctx.createGain();
-    gain.gain.value = masterVolume;
-    const analyser = ctx.createAnalyser();
+    if (audioStartingRef.current) return;
+    audioStartingRef.current = true;
+    try {
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      const ctx = new Ctor();
+      const gain = ctx.createGain();
+      gain.gain.value = masterVolume;
+      const analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.8;
     gain.connect(analyser);
@@ -3067,6 +3145,9 @@ export default function GraphingCalculatorSynthApp() {
         if (!notes.length) { out[i] = 0; continue; }
         let mix = 0;
         for (const [, ns] of notes) {
+          if (ns.currentVelocity === undefined) ns.currentVelocity = ns.velocity;
+          else ns.currentVelocity += (ns.velocity - ns.currentVelocity) * 0.01;
+
           const { attack, decay, sustain } = adsrRef.current;
           if (ns.stage === "attack") {
             const attackStep = 1 / Math.max(1, attack * ctx.sampleRate);
@@ -3083,10 +3164,10 @@ export default function GraphingCalculatorSynthApp() {
           }
           if (ns.envGain <= 0 && ns.stage === "release") continue;
           const p = phaseRef.current.get(ns.note) || 0;
-          mix += buildSampleRef.current(p / ctx.sampleRate, ns.freq, ns.velocity, ns.note, smoothParams) * 0.28 * ns.envGain * ns.velocity;
+          mix += buildSampleRef.current(p / ctx.sampleRate, ns.freq, ns.currentVelocity, ns.note, smoothParams) * 0.28 * ns.envGain * ns.currentVelocity;
           phaseRef.current.set(ns.note, p + 1);
         }
-        out[i] = clamp(mix, -1, 1);
+        out[i] = Math.tanh(mix); // Soft clipping to prevent harsh digital distortion on chords
       }
       // Clean up finished release envelopes
       for (const [key, ns] of notes) {
@@ -3103,6 +3184,9 @@ export default function GraphingCalculatorSynthApp() {
     gainRef.current = gain;
     setAudioReady(true);
     setSampleRate(ctx.sampleRate);
+    } finally {
+      audioStartingRef.current = false;
+    }
   };
 
   const refreshActiveNotes = () => {
@@ -3752,16 +3836,16 @@ export default function GraphingCalculatorSynthApp() {
           }}>∿</span>
           <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase", color: T.amber }}>EquationSynth</span>
           <span style={{ fontSize: 10, color: T.textMuted, fontWeight: 500, marginLeft: 4, letterSpacing: 2 }}>v0.1</span>
-          <div style={{ display: "flex", marginLeft: 16, gap: 2 }}>
+          <div style={{ display: "flex", marginLeft: 16, gap: 4 }}>
             {[{ id: "synth", label: "SYNTH" }, { id: "draw", label: "DRAW" }, { id: "drums", label: "DRUMS" }].map((tab) => (
-              <button key={tab.id} onClick={() => setPage(tab.id)} style={{
+              <button key={tab.id} onClick={() => { setPage(tab.id); window.scrollTo(0,0); }} style={{
                 height: 28, padding: "0 14px", fontSize: 11, fontWeight: 700,
                 fontFamily: T.font, letterSpacing: 1.5, textTransform: "uppercase",
                 border: `1px solid ${page === tab.id ? T.accent : T.borderHi}`,
                 borderRadius: 2, cursor: "pointer",
-                background: page === tab.id ? "linear-gradient(180deg, #cc6e08, #a05500)" : "linear-gradient(180deg, #2e2820, #1a1510)",
-                color: page === tab.id ? "#f0e6d2" : T.textDim,
-                boxShadow: page === tab.id ? `0 0 8px ${T.accentGlow}` : "none",
+                background: page === tab.id ? "linear-gradient(180deg, #881100, #440000)" : "linear-gradient(180deg, #333333, #222222)",
+                color: page === tab.id ? T.white : T.textDim,
+                boxShadow: page === tab.id ? `0 0 8px ${T.accentGlow}, inset 0 1px 1px rgba(255,255,255,0.2)` : "inset 0 1px 1px rgba(255,255,255,0.1), 0 2px 4px rgba(0,0,0,0.5)",
               }}>{tab.label}</button>
             ))}
           </div>
@@ -3775,6 +3859,7 @@ export default function GraphingCalculatorSynthApp() {
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: activeNotes.length ? T.green : T.textMuted }} />
             {midiStatus}
           </Pill>
+
           {authUser ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 10, color: T.green, fontFamily: T.monoFont, letterSpacing: 1, textTransform: "uppercase" }}>
@@ -3800,7 +3885,7 @@ export default function GraphingCalculatorSynthApp() {
       </div>
 
       {/* ── Drum machines (always mounted for persistence) ────── */}
-      <div style={{ display: page === "drums" ? "block" : "none" }}>
+      <div id="section-drums" className="hardware-module" style={{ display: page === "drums" ? "block" : "none" }}>
         <DrumMachine
           ref={drumMachineRef}
           audioCtxRef={audioCtxRef}
@@ -3887,11 +3972,13 @@ export default function GraphingCalculatorSynthApp() {
         </div>
       </div>
 
-      {/* ── page content ─────────────────────────────────────────── */}
-      {page === "draw" ? (
+      {/* ── DRAW MODULE (always mounted for persistence) ──────── */}
+      <div id="section-draw" className="hardware-module" style={{ display: page === "draw" ? "block" : "none" }}>
         <WaveDrawer onUseWave={onUseWave} />
-      ) : page === "drums" ? null : (
-      <div style={{ maxWidth: 1480, margin: "0 auto", padding: "20px 20px 40px" }}>
+      </div>
+
+      {/* ── SYNTH MODULE (always mounted for persistence) ─────── */}
+      <div id="section-synth" className="hardware-module" style={{ display: page === "synth" ? "block" : "none", maxWidth: 1480, margin: "0 auto", padding: "20px 20px 40px" }}>
         <div style={{
           display: "grid",
           gridTemplateColumns: "minmax(340px, 440px) 1fr minmax(260px, 320px)",
@@ -3901,7 +3988,9 @@ export default function GraphingCalculatorSynthApp() {
           {/* ── LEFT COLUMN: Plot + Equation ─────────────────────── */}
           <div>
             <Section title="Waveform Preview" icon="📈">
-              <PlotCanvas equation={equation} params={params} xScale={xScale} yScale={yScale} drawnWave={drawnWaveRef.current} lfoParams={lfoDisplay} />
+              <div className="crt-screen">
+                <PlotCanvas equation={equation} params={params} xScale={xScale} yScale={yScale} drawnWave={drawnWaveRef.current} lfoParams={lfoDisplay} />
+              </div>
 
               {/* equation input */}
               <div style={{ display: "flex", gap: 0, marginTop: 14 }}>
@@ -4107,11 +4196,15 @@ export default function GraphingCalculatorSynthApp() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4, paddingLeft: 2 }}>Oscilloscope</div>
-                <Oscilloscope analyserRef={analyserRef} heldNotesRef={heldNotesRef} audioCtxRef={audioCtxRef} />
+                <div className="crt-screen">
+                  <Oscilloscope analyserRef={analyserRef} heldNotesRef={heldNotesRef} audioCtxRef={audioCtxRef} />
+                </div>
               </div>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4, paddingLeft: 2 }}>Spectrum</div>
-                <Spectrum analyserRef={analyserRef} />
+                <div className="crt-screen">
+                  <Spectrum analyserRef={analyserRef} />
+                </div>
               </div>
             </div>
 
@@ -4666,7 +4759,6 @@ export default function GraphingCalculatorSynthApp() {
           </div>
         </div>
       </div>
-      )}
     </div>
   );
 }
