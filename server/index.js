@@ -6,6 +6,7 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import rateLimit from "express-rate-limit";
 import nodemailer from "nodemailer";
+import Stripe from "stripe";
 
 // ── Config ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
@@ -35,6 +36,18 @@ if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
     secure: SMTP_PORT === 465,
     auth: { user: SMTP_USER, pass: SMTP_PASS },
   });
+}
+
+// ── Stripe config ───────────────────────────────────────────────────
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID;
+
+let stripe = null;
+if (STRIPE_SECRET_KEY) {
+  stripe = new Stripe(STRIPE_SECRET_KEY);
+} else if (NODE_ENV === "production") {
+  console.error("WARNING: STRIPE_SECRET_KEY not set — payment endpoints will be disabled");
 }
 
 // ── Database ────────────────────────────────────────────────────────
@@ -170,6 +183,14 @@ const resetLimiter = rateLimit({
   message: { error: "Too many reset requests, please try again later" },
 });
 
+const checkoutLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many checkout attempts, please try again later" },
+});
+
 // ── App ─────────────────────────────────────────────────────────────
 const app = express();
 
@@ -178,6 +199,43 @@ app.use(cors({
   origin: NODE_ENV === "production" ? FRONTEND_URL : true,
   credentials: true,
 }));
+
+// ── Stripe webhook (raw body, before express.json) ──────────────────
+app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), (req, res) => {
+  if (!stripe || !STRIPE_WEBHOOK_SECRET) {
+    return res.status(503).json({ error: "Stripe not configured" });
+  }
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, req.headers["stripe-signature"], STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error("Stripe webhook signature verification failed:", err.message);
+    return res.status(400).json({ error: "Invalid signature" });
+  }
+
+  console.log(`[Stripe] Webhook received: ${event.type} at ${new Date().toISOString()}`);
+
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+    const userId = parseInt(session.client_reference_id, 10);
+    if (userId && Number.isFinite(userId)) {
+      stmts.setUserPaid.run(session.customer || null, session.payment_intent || null, userId);
+      stmts.insertPayment.run(userId, session.payment_intent || null, 200, "usd", "succeeded");
+      console.log(`[Stripe] User ${userId} upgraded to paid`);
+    }
+  } else if (event.type === "charge.refunded") {
+    const charge = event.data.object;
+    const paymentIntent = charge.payment_intent;
+    if (paymentIntent) {
+      stmts.setUserUnpaid.run(paymentIntent);
+      stmts.updatePaymentStatus.run("refunded", paymentIntent);
+      console.log(`[Stripe] Payment ${paymentIntent} refunded`);
+    }
+  }
+
+  res.json({ received: true });
+});
 
 app.use(express.json({ limit: "2mb" }));
 
@@ -301,6 +359,44 @@ app.post("/api/reset-password", (req, res) => {
   stmts.markResetTokenUsed.run(record.id);
 
   res.json({ message: "Password has been reset successfully" });
+});
+
+// ── Stripe checkout ─────────────────────────────────────────────────
+app.post("/api/checkout", authenticate, checkoutLimiter, async (req, res) => {
+  if (!stripe || !STRIPE_PRICE_ID) {
+    return res.status(503).json({ error: "Payments not configured" });
+  }
+
+  const user = stmts.findUserById.get(req.userId);
+  if (!user) return res.status(404).json({ error: "User not found" });
+  if (user.paid) return res.status(400).json({ error: "Already upgraded" });
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+      client_reference_id: String(req.userId),
+      customer_email: user.email,
+      success_url: `${FRONTEND_URL}?payment=success`,
+      cancel_url: `${FRONTEND_URL}?payment=cancelled`,
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error("Stripe checkout error:", err.message);
+    res.status(500).json({ error: "Failed to create checkout session" });
+  }
+});
+
+// ── Refresh token ───────────────────────────────────────────────────
+app.post("/api/refresh-token", authenticate, (req, res) => {
+  const user = stmts.findUserById.get(req.userId);
+  if (!user) return res.status(404).json({ error: "User not found" });
+  const paid = !!user.paid;
+  const token = makeToken(user.id, paid);
+  res.json({
+    token,
+    user: { id: user.id, email: user.email, displayName: user.display_name, tier: paid ? "paid" : "free" },
+  });
 });
 
 // ── Preset routes (tier-gated) ──────────────────────────────────────

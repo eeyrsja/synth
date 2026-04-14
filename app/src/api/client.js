@@ -6,8 +6,14 @@ export async function apiFetch(path, opts = {}, authToken = null) {
   const headers = { "Content-Type": "application/json", ...opts.headers };
   if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
   const res = await fetch(path, { ...opts, headers });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Request failed");
+  const text = await res.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(res.ok ? "Invalid server response" : `Server error (${res.status})`);
+  }
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
 
@@ -42,4 +48,12 @@ export async function saveCloudPresetApi(name, data, authToken) {
 
 export async function deleteCloudPresetApi(id, authToken) {
   return apiFetch(`/api/presets/${id}`, { method: "DELETE" }, authToken);
+}
+
+export async function checkoutApi(authToken) {
+  return apiFetch("/api/checkout", { method: "POST" }, authToken);
+}
+
+export async function refreshTokenApi(authToken) {
+  return apiFetch("/api/refresh-token", { method: "POST" }, authToken);
 }

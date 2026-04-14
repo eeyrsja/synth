@@ -26,7 +26,7 @@ import { WaveDrawer } from "./components/draw";
 import { DrumMachine, PO32Tonic } from "./components/drums";
 
 // ── API ─────────────────────────────────────────────────────────────
-import { apiFetch, loginApi, signupApi, fetchCloudPresetsApi, saveCloudPresetApi, deleteCloudPresetApi } from "./api/client.js";
+import { apiFetch, loginApi, signupApi, fetchCloudPresetsApi, saveCloudPresetApi, deleteCloudPresetApi, checkoutApi, refreshTokenApi } from "./api/client.js";
 
 // ═══════════════════════════════════════════════════════════════════
 //  MAIN APP
@@ -139,6 +139,46 @@ export default function GraphingCalculatorSynthApp() {
   };
 
   useEffect(() => { if (authToken) fetchCloudPresets(); }, []);
+
+  // ── Payment flow ──────────────────────────────────────────────────
+  const [paymentStatus, setPaymentStatus] = useState(null); // "success" | "cancelled" | null
+
+  const doCheckout = async () => {
+    if (!authToken) { setAuthModal("login"); setAuthError(""); return; }
+    try {
+      const { url } = await checkoutApi(authToken);
+      window.location.href = url;
+    } catch (e) {
+      setPaymentStatus("error");
+      setTimeout(() => setPaymentStatus(null), 5000);
+    }
+  };
+
+  // Detect payment return and refresh token
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get("payment");
+    if (payment === "success" || payment === "cancelled") {
+      setPaymentStatus(payment);
+      // Clean URL
+      const url = new URL(window.location);
+      url.searchParams.delete("payment");
+      window.history.replaceState({}, "", url.pathname);
+
+      if (payment === "success" && authToken) {
+        // Refresh token to get updated tier
+        refreshTokenApi(authToken).then(({ token, user }) => {
+          setAuthToken(token);
+          setAuthUser(user);
+          localStorage.setItem("wavecraft_token", token);
+          localStorage.setItem("wavecraft_user", JSON.stringify(user));
+        }).catch(() => {});
+      }
+
+      // Auto-dismiss after 5s
+      setTimeout(() => setPaymentStatus(null), 5000);
+    }
+  }, []);
 
   // ── LFO state ──────────────────────────────────────────────────────
   const [lfos, setLfos] = useState([
@@ -957,6 +997,15 @@ export default function GraphingCalculatorSynthApp() {
               <span style={{ fontSize: 10, color: T.green, fontFamily: T.monoFont, letterSpacing: 1, textTransform: "uppercase" }}>
                 {authUser.displayName || authUser.email}
               </span>
+              {authUser.tier !== "paid" && (
+                <button onClick={doCheckout} style={{
+                  height: 24, padding: "0 10px", fontSize: 9, fontWeight: 700,
+                  fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase",
+                  border: "1px solid #22cc44", borderRadius: 2, cursor: "pointer",
+                  background: "linear-gradient(180deg, #1a4d1a, #0d260d)", color: T.green,
+                  boxShadow: "0 0 8px rgba(34,204,68,0.3)",
+                }}>Upgrade — $2</button>
+              )}
               <button onClick={doLogout} style={{
                 height: 24, padding: "0 10px", fontSize: 9, fontWeight: 700,
                 fontFamily: T.font, letterSpacing: 1, textTransform: "uppercase",
@@ -965,16 +1014,37 @@ export default function GraphingCalculatorSynthApp() {
               }}>Logout</button>
             </div>
           ) : (
-            <button onClick={() => { setAuthModal("login"); setAuthError(""); }} style={{
-              height: 28, padding: "0 14px", fontSize: 10, fontWeight: 700,
-              fontFamily: T.font, letterSpacing: 1.5, textTransform: "uppercase",
-              border: `1px solid ${T.accent}`, borderRadius: 2, cursor: "pointer",
-              background: "linear-gradient(180deg, #cc6e08, #a05500)", color: "#f0e6d2",
-              boxShadow: `0 0 8px ${T.accentGlow}`,
-            }}>Sign In</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button onClick={() => { setAuthModal("login"); setAuthError(""); }} style={{
+                height: 28, padding: "0 14px", fontSize: 10, fontWeight: 700,
+                fontFamily: T.font, letterSpacing: 1.5, textTransform: "uppercase",
+                border: `1px solid ${T.accent}`, borderRadius: 2, cursor: "pointer",
+                background: "linear-gradient(180deg, #cc6e08, #a05500)", color: "#f0e6d2",
+                boxShadow: `0 0 8px ${T.accentGlow}`,
+              }}>Sign In</button>
+            </div>
           )}
         </div>
       </div>
+
+      {/* ── Payment toast ────────────────────────────────────── */}
+      {paymentStatus && (
+        <div style={{
+          position: "fixed", top: 60, left: "50%", transform: "translateX(-50%)",
+          zIndex: 9999, padding: "10px 24px", borderRadius: 4,
+          background: paymentStatus === "success" ? "linear-gradient(180deg, #1a4d1a, #0d260d)" : "linear-gradient(180deg, #4d1a1a, #260d0d)",
+          border: `1px solid ${paymentStatus === "success" ? "#22cc44" : "#cc4444"}`,
+          color: paymentStatus === "success" ? T.green : "#ff6666",
+          fontSize: 12, fontWeight: 700, fontFamily: T.font, letterSpacing: 1,
+          boxShadow: `0 4px 20px rgba(0,0,0,0.5)`,
+        }}>
+          {paymentStatus === "success" ? "Payment successful — you're now upgraded!" : "Payment cancelled"}
+          <button onClick={() => setPaymentStatus(null)} style={{
+            marginLeft: 16, background: "none", border: "none", color: T.textMuted,
+            cursor: "pointer", fontSize: 14, lineHeight: 1,
+          }}>✕</button>
+        </div>
+      )}
 
       {/* ── User Guide ─────────────────────────────────────── */}
       <div id="section-guide" className="hardware-module" style={{ display: page === "guide" ? "block" : "none", maxWidth: 960, margin: "0 auto", padding: "20px 20px 60px" }}>
