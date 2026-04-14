@@ -13,7 +13,14 @@ export async function apiFetch(path, opts = {}, authToken = null) {
   } catch {
     throw new Error(res.ok ? "Invalid server response" : `Server error (${res.status})`);
   }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    if (res.status === 401 && authToken) {
+      // Token expired or server restarted with new secret — clear stale auth
+      localStorage.removeItem("wavecraft_token");
+      localStorage.removeItem("wavecraft_user");
+    }
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
   return data;
 }
 
@@ -31,23 +38,34 @@ export async function signupApi(email, password, displayName) {
   });
 }
 
-export async function fetchCloudPresetsApi(authToken) {
-  return apiFetch("/api/presets", {}, authToken);
+export async function fetchPresetsApi(authToken, type = "synth") {
+  return apiFetch(`/api/presets?type=${encodeURIComponent(type)}`, {}, authToken);
 }
 
-export async function fetchCloudPresetApi(id, authToken) {
+export async function fetchPresetApi(id, authToken) {
   return apiFetch(`/api/presets/${id}`, {}, authToken);
 }
 
-export async function saveCloudPresetApi(name, data, authToken) {
+export async function savePresetApi(name, data, authToken, type = "synth") {
   return apiFetch("/api/presets", {
     method: "POST",
-    body: JSON.stringify({ name, data }),
+    body: JSON.stringify({ name, data, type }),
   }, authToken);
 }
 
-export async function deleteCloudPresetApi(id, authToken) {
+export async function deletePresetApi(id, authToken) {
   return apiFetch(`/api/presets/${id}`, { method: "DELETE" }, authToken);
+}
+
+export async function fetchStateApi(authToken) {
+  return apiFetch("/api/state", {}, authToken);
+}
+
+export async function saveStateApi(data, authToken) {
+  return apiFetch("/api/state", {
+    method: "PUT",
+    body: JSON.stringify({ data }),
+  }, authToken);
 }
 
 export async function checkoutApi(authToken) {

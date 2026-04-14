@@ -18,7 +18,7 @@ if (NODE_ENV === "production" && !process.env.JWT_SECRET) {
   console.error("FATAL: JWT_SECRET environment variable is required in production");
   process.exit(1);
 }
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString("hex");
+const JWT_SECRET = process.env.JWT_SECRET || "wavecraft-dev-secret-do-not-use-in-production";
 const TOKEN_EXPIRY = "30d";
 
 // Email config (optional — password reset won't work without it)
@@ -112,6 +112,18 @@ if (!columnExists("users", "stripe_customer_id")) {
 if (!columnExists("users", "stripe_payment_id")) {
   db.exec(`ALTER TABLE users ADD COLUMN stripe_payment_id TEXT`);
 }
+if (!columnExists("presets", "type")) {
+  db.exec(`ALTER TABLE presets ADD COLUMN type TEXT NOT NULL DEFAULT 'synth'`);
+}
+
+// User state table for session persistence
+db.exec(`
+  CREATE TABLE IF NOT EXISTS user_state (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    data TEXT NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+`);
 
 // ── Prepared statements ─────────────────────────────────────────────
 const stmts = {
@@ -399,40 +411,62 @@ app.post("/api/refresh-token", authenticate, (req, res) => {
   });
 });
 
-// ── Preset routes (tier-gated) ──────────────────────────────────────
-app.get("/api/presets", authenticate, requirePaid, (req, res) => {
-  const presets = stmts.listPresets.all(req.userId);
+// ── Session state (auto-save / restore) ─────────────────────────────
+app.get("/api/state", authenticate, (req, res) => {
+  const row = db.prepare("SELECT data FROM user_state WHERE user_id = ?").get(req.userId);
+  if (!row) return res.json({ state: null });
+  try { res.json({ state: JSON.parse(row.data) }); } catch { res.json({ state: null }); }
+});
+
+app.put("/api/state", authenticate, (req, res) => {
+  const { data } = req.body;
+  if (!data || typeof data !== "object") {
+    return res.status(400).json({ error: "State data is required" });
+  }
+  db.prepare(
+    "INSERT INTO user_state (user_id, data) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, updated_at = datetime('now')"
+  ).run(req.userId, JSON.stringify(data));
+  res.json({ ok: true });
+});
+
+// ── Preset routes (auth required) ───────────────────────────────────
+app.get("/api/presets", authenticate, (req, res) => {
+  const type = req.query.type || "synth";
+  const presets = db.prepare("SELECT id, name, type, created_at, updated_at FROM presets WHERE user_id = ? AND type = ? ORDER BY updated_at DESC").all(req.userId, type);
   res.json({ presets });
 });
 
-app.get("/api/presets/:id", authenticate, requirePaid, (req, res) => {
+app.get("/api/presets/:id", authenticate, (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id < 1) {
     return res.status(400).json({ error: "Invalid preset ID" });
   }
-  const preset = stmts.getPreset.get(id, req.userId);
+  const preset = db.prepare("SELECT * FROM presets WHERE id = ? AND user_id = ?").get(id, req.userId);
   if (!preset) return res.status(404).json({ error: "Preset not found" });
   res.json({ preset: { ...preset, data: JSON.parse(preset.data) } });
 });
 
-app.post("/api/presets", authenticate, requirePaid, (req, res) => {
-  const { name, data } = req.body;
+app.post("/api/presets", authenticate, (req, res) => {
+  const { name, data, type } = req.body;
   if (!name || typeof name !== "string" || name.trim().length < 1 || name.length > 100) {
     return res.status(400).json({ error: "Name must be 1-100 characters" });
   }
   if (!data || typeof data !== "object") {
     return res.status(400).json({ error: "Preset data is required" });
   }
-  const result = stmts.upsertPreset.run(req.userId, name.trim(), JSON.stringify(data));
+  const presetType = type === "drums" ? "drums" : "synth";
+  const result = db.prepare(
+    "INSERT INTO presets (user_id, name, data, type) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, name) DO UPDATE SET data = excluded.data, type = excluded.type, updated_at = datetime('now')"
+  ).run(req.userId, name.trim(), JSON.stringify(data), presetType);
   res.status(201).json({ id: result.lastInsertRowid, name: name.trim() });
 });
 
-app.delete("/api/presets/:id", authenticate, requirePaid, (req, res) => {
+app.delete("/api/presets/:id", authenticate, (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id < 1) {
     return res.status(400).json({ error: "Invalid preset ID" });
   }
-  const result = stmts.deletePreset.run(id, req.userId);
+  const result = db.prepare("DELETE FROM presets WHERE id = ? AND user_id = ?").run(id, req.userId);
   if (result.changes === 0) return res.status(404).json({ error: "Preset not found" });
   res.json({ ok: true });
 });

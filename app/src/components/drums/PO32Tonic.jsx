@@ -188,41 +188,6 @@ const PO32Tonic = React.forwardRef(function PO32Tonic({ audioCtxRef, gainRef, se
     });
   };
 
-  // ── PO-32 User Presets ──────────────────────────────────────────
-  const [po32Presets, setPo32Presets] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("wavecraft_po32_presets") || "[]"); } catch { return []; }
-  });
-  const [newPo32PresetName, setNewPo32PresetName] = useState("");
-
-  const savePo32Preset = () => {
-    const name = newPo32PresetName.trim();
-    if (!name) return;
-    const preset = {
-      name, grid: grid.map(r => [...r]), accents: [...accents],
-      tempo, swing, soundParams: JSON.parse(JSON.stringify(soundParams)),
-    };
-    const existing = po32Presets.findIndex(p => p.name === name);
-    const next = [...po32Presets];
-    if (existing >= 0) next[existing] = preset; else next.push(preset);
-    setPo32Presets(next);
-    localStorage.setItem("wavecraft_po32_presets", JSON.stringify(next));
-    setNewPo32PresetName("");
-  };
-
-  const loadPo32Preset = (p) => {
-    setGrid(p.grid.map(r => [...r]));
-    setAccents([...p.accents]);
-    setTempo(p.tempo);
-    if (p.swing != null) setSwing(p.swing);
-    if (p.soundParams) setSoundParams(JSON.parse(JSON.stringify(p.soundParams)));
-  };
-
-  const deletePo32Preset = (name) => {
-    const next = po32Presets.filter(p => p.name !== name);
-    setPo32Presets(next);
-    localStorage.setItem("wavecraft_po32_presets", JSON.stringify(next));
-  };
-
   const btnPrimary = {
     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
     height: 38, padding: "0 18px", borderRadius: 3,
@@ -472,61 +437,6 @@ const PO32Tonic = React.forwardRef(function PO32Tonic({ audioCtxRef, gainRef, se
           </div>
         </Section>
       </div>
-
-      {/* My PO-32 Presets */}
-      <Section title="My PO-32 Presets" icon="💾" style={{ marginTop: 12 }}>
-        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-          <input
-            value={newPo32PresetName}
-            onChange={(e) => setNewPo32PresetName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && savePo32Preset()}
-            placeholder="Pattern name…"
-            style={{
-              flex: 1, height: 36, fontSize: 13, padding: "0 10px",
-              background: T.surface, color: T.white,
-              border: `1px solid ${T.border}`, borderRadius: 8,
-              outline: "none", minWidth: 0, fontFamily: T.font,
-            }}
-          />
-          <button onClick={savePo32Preset} disabled={!newPo32PresetName.trim()} style={{
-            ...btnPrimary, height: 34, padding: "0 14px", fontSize: 10,
-            opacity: newPo32PresetName.trim() ? 1 : 0.4,
-            cursor: newPo32PresetName.trim() ? "pointer" : "not-allowed",
-          }}>
-            Save
-          </button>
-        </div>
-        {po32Presets.length === 0 ? (
-          <div style={{ fontSize: 12, color: T.textMuted, textAlign: "center", padding: "8px 0" }}>
-            No saved PO-32 presets yet
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            {po32Presets.map((p) => (
-              <div key={p.name} style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "5px 10px", borderRadius: 2,
-                border: `1px solid ${T.border}`,
-                background: "linear-gradient(180deg, #2e2820, #1a1510)",
-              }}>
-                <button onClick={() => loadPo32Preset(p)} style={{
-                  flex: 1, background: "none", border: "none",
-                  color: T.text, fontSize: 10, fontWeight: 700,
-                  cursor: "pointer", textAlign: "left", padding: 0,
-                  fontFamily: T.font, letterSpacing: 0.8, textTransform: "uppercase",
-                }}>
-                  {p.name}
-                </button>
-                <span style={{ fontSize: 9, color: T.textMuted, fontFamily: T.font }}>{p.tempo}bpm</span>
-                <button onClick={() => deletePo32Preset(p.name)} title="Delete" style={{
-                  background: "none", border: "none", cursor: "pointer",
-                  color: T.textMuted, fontSize: 14, padding: "0 2px", lineHeight: 1,
-                }}>✕</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
     </div>
   );
 });

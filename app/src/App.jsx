@@ -26,7 +26,7 @@ import { WaveDrawer } from "./components/draw";
 import { DrumMachine, PO32Tonic } from "./components/drums";
 
 // ── API ─────────────────────────────────────────────────────────────
-import { apiFetch, loginApi, signupApi, fetchCloudPresetsApi, saveCloudPresetApi, deleteCloudPresetApi, checkoutApi, refreshTokenApi } from "./api/client.js";
+import { apiFetch, loginApi, signupApi, fetchPresetsApi, savePresetApi, deletePresetApi, fetchStateApi, saveStateApi, checkoutApi, refreshTokenApi } from "./api/client.js";
 
 // ═══════════════════════════════════════════════════════════════════
 //  MAIN APP
@@ -68,8 +68,9 @@ export default function GraphingCalculatorSynthApp() {
   const [authForm, setAuthForm] = useState({ email: "", password: "", displayName: "" });
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
-  const [cloudPresets, setCloudPresets] = useState([]);
-  const [cloudLoading, setCloudLoading] = useState(false);
+  const [presets, setPresets] = useState([]);
+  const [presetsLoading, setPresetsLoading] = useState(false);
+  const [drumPresets, setDrumPresets] = useState([]);
 
   const doLogin = async () => {
     setAuthError(""); setAuthLoading(true);
@@ -79,7 +80,8 @@ export default function GraphingCalculatorSynthApp() {
       localStorage.setItem("wavecraft_token", token);
       localStorage.setItem("wavecraft_user", JSON.stringify(user));
       setAuthModal(null); setAuthForm({ email: "", password: "", displayName: "" });
-      fetchCloudPresets(token);
+      fetchPresets(token);
+      restoreState(token);
     } catch (e) { setAuthError(e.message); }
     setAuthLoading(false);
   };
@@ -92,53 +94,68 @@ export default function GraphingCalculatorSynthApp() {
       localStorage.setItem("wavecraft_token", token);
       localStorage.setItem("wavecraft_user", JSON.stringify(user));
       setAuthModal(null); setAuthForm({ email: "", password: "", displayName: "" });
-      fetchCloudPresets(token);
+      fetchPresets(token);
     } catch (e) { setAuthError(e.message); }
     setAuthLoading(false);
   };
 
   const doLogout = () => {
-    setAuthToken(null); setAuthUser(null); setCloudPresets([]);
+    setAuthToken(null); setAuthUser(null); setPresets([]); setDrumPresets([]);
     localStorage.removeItem("wavecraft_token");
     localStorage.removeItem("wavecraft_user");
   };
 
-  const fetchCloudPresets = async (token) => {
-    setCloudLoading(true);
+  const fetchPresets = async (token) => {
+    setPresetsLoading(true);
     try {
-      const { presets } = await fetchCloudPresetsApi(token || authToken);
-      setCloudPresets(presets);
+      const [synth, drums] = await Promise.all([
+        fetchPresetsApi(token || authToken, "synth"),
+        fetchPresetsApi(token || authToken, "drums"),
+      ]);
+      setPresets(synth.presets);
+      setDrumPresets(drums.presets);
     } catch { /* silently fail */ }
-    setCloudLoading(false);
+    setPresetsLoading(false);
   };
 
-  const saveCloudPreset = async (name) => {
+  const savePreset = async (name, type = "synth", data = null) => {
     if (!authToken || !name) return;
-    const data = {
-      eq: equationInput, a, b, c, d, xScale, yScale, masterVolume,
-      adsr: { ...DEFAULT_ADSR, ...adsr },
-      filter: { ...DEFAULT_FILTER, ...filter },
-      fxParams: withFxDefaults(fxParams),
-      add7th, lfos: JSON.parse(JSON.stringify(lfos)),
-      drawnWave: drawnWaveRef.current ? Array.from(drawnWaveRef.current) : null,
-    };
-    await saveCloudPresetApi(name, data, authToken);
-    fetchCloudPresets();
+    try {
+      const presetData = data || {
+        eq: equationInput, a, b, c, d, xScale, yScale, masterVolume,
+        adsr: { ...DEFAULT_ADSR, ...adsr },
+        filter: { ...DEFAULT_FILTER, ...filter },
+        fxParams: withFxDefaults(fxParams),
+        add7th, lfos: JSON.parse(JSON.stringify(lfos)),
+        drawnWave: drawnWaveRef.current ? Array.from(drawnWaveRef.current) : null,
+      };
+      await savePresetApi(name, presetData, authToken, type);
+      await fetchPresets();
+      return true;
+    } catch (e) {
+      console.error("Failed to save preset:", e.message);
+      return false;
+    }
   };
 
-  const loadCloudPreset = async (id) => {
+  const loadPreset = async (id) => {
     try {
       const res = await apiFetch(`/api/presets/${id}`, {}, authToken);
-      loadUserPreset(res.preset.data);
+      const p = res.preset.data;
+      if (res.preset.type === "drums") {
+        loadCombinedDrumPreset(p);
+      } else {
+        loadSynthPreset(p);
+      }
     } catch { /* ignore */ }
   };
 
-  const deleteCloudPreset = async (id) => {
-    await deleteCloudPresetApi(id, authToken);
-    fetchCloudPresets();
+  const deletePreset = async (id) => {
+    await deletePresetApi(id, authToken);
+    fetchPresets();
   };
 
-  useEffect(() => { if (authToken) fetchCloudPresets(); }, []);
+  useEffect(() => { if (authToken) { fetchPresets(); restoreState(authToken); } }, []);
 
   // ── Payment flow ──────────────────────────────────────────────────
   const [paymentStatus, setPaymentStatus] = useState(null); // "success" | "cancelled" | null
@@ -242,33 +259,11 @@ export default function GraphingCalculatorSynthApp() {
     };
   }, [a, b, c, d, filter.cutoff, filter.resonance, masterVolume, lfoUiTick, lfoUiMod]);
 
-  // ── User Presets (localStorage) ──────────────────────────────────
-  const [userPresets, setUserPresets] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("wavecraft_presets") || "[]"); } catch { return []; }
-  });
+  // ── Preset helpers ─────────────────────────────────────────────────
   const [newPresetName, setNewPresetName] = useState("");
+  const [newDrumPresetName, setNewDrumPresetName] = useState("");
 
-  const saveUserPreset = () => {
-    const name = newPresetName.trim();
-    if (!name) return;
-    const preset = {
-      name, eq: equationInput, a, b, c, d, xScale, yScale, masterVolume,
-      adsr: { ...DEFAULT_ADSR, ...adsr },
-      filter: { ...DEFAULT_FILTER, ...filter },
-      fxParams: withFxDefaults(fxParams),
-      add7th,
-      lfos: JSON.parse(JSON.stringify(lfos)),
-      drawnWave: drawnWaveRef.current ? Array.from(drawnWaveRef.current) : null,
-    };
-    const existing = userPresets.findIndex((p) => p.name === name);
-    const next = [...userPresets];
-    if (existing >= 0) next[existing] = preset; else next.push(preset);
-    setUserPresets(next);
-    localStorage.setItem("wavecraft_presets", JSON.stringify(next));
-    setNewPresetName("");
-  };
-
-  const loadUserPreset = (p) => {
+  const loadSynthPreset = (p) => {
     const engine = engineRef.current;
     if (p.drawnWave) {
       drawnWaveRef.current = new Float32Array(p.drawnWave);
@@ -291,10 +286,80 @@ export default function GraphingCalculatorSynthApp() {
     if (p.lfos) setLfos(p.lfos);
   };
 
-  const deleteUserPreset = (name) => {
-    const next = userPresets.filter((p) => p.name !== name);
-    setUserPresets(next);
-    localStorage.setItem("wavecraft_presets", JSON.stringify(next));
+  const loadCombinedDrumPreset = (p) => {
+    if (p.bpm != null) setDrumBpm(p.bpm);
+    if (p.vlTone && drumMachineRef.current) drumMachineRef.current.loadState(p.vlTone);
+    if (p.po32 && po32Ref.current) po32Ref.current.loadState(p.po32);
+  };
+
+  const saveDrumPreset = async () => {
+    const name = newDrumPresetName.trim();
+    if (!authToken || !name) return;
+    try {
+      const data = {
+        bpm: drumBpm,
+        vlTone: drumMachineRef.current?.getState() ?? null,
+        po32: po32Ref.current?.getState() ?? null,
+      };
+      await savePresetApi(name, data, authToken, "drums");
+      await fetchPresets();
+      setNewDrumPresetName("");
+    } catch (e) {
+      console.error("Failed to save drum preset:", e.message);
+    }
+  };
+
+  // ── Session state persistence ─────────────────────────────────────
+  const stateTimerRef = useRef(null);
+  const lastSavedStateRef = useRef(null);
+
+  const gatherState = useCallback(() => ({
+    synth: {
+      eq: equationInput, a, b, c, d, xScale, yScale, masterVolume,
+      adsr: { ...DEFAULT_ADSR, ...adsr },
+      filter: { ...DEFAULT_FILTER, ...filter },
+      fxParams: withFxDefaults(fxParams),
+      add7th, lfos: JSON.parse(JSON.stringify(lfos)),
+      drawnWave: drawnWaveRef.current ? Array.from(drawnWaveRef.current) : null,
+    },
+    drums: {
+      bpm: drumBpm,
+      vlTone: drumMachineRef.current?.getState() ?? null,
+      po32: po32Ref.current?.getState() ?? null,
+    },
+    page,
+  }), [equationInput, a, b, c, d, xScale, yScale, masterVolume, adsr, filter, fxParams, add7th, lfos, drumBpm, page]);
+
+  // Debounced auto-save (2s after last change)
+  useEffect(() => {
+    if (!authToken) return;
+    if (stateTimerRef.current) clearTimeout(stateTimerRef.current);
+    stateTimerRef.current = setTimeout(() => {
+      const state = gatherState();
+      const json = JSON.stringify(state);
+      if (json !== lastSavedStateRef.current) {
+        lastSavedStateRef.current = json;
+        saveStateApi(state, authToken).catch(() => {});
+      }
+    }, 2000);
+    return () => { if (stateTimerRef.current) clearTimeout(stateTimerRef.current); };
+  }, [authToken, gatherState]);
+
+  const restoreState = async (token) => {
+    try {
+      const { state } = await fetchStateApi(token);
+      if (!state) return;
+      if (state.synth) loadSynthPreset(state.synth);
+      if (state.drums) {
+        if (state.drums.bpm != null) setDrumBpm(state.drums.bpm);
+        // Drum machines need a tick to mount before loading state
+        setTimeout(() => {
+          if (state.drums.vlTone && drumMachineRef.current) drumMachineRef.current.loadState(state.drums.vlTone);
+          if (state.drums.po32 && po32Ref.current) po32Ref.current.loadState(state.drums.po32);
+        }, 100);
+      }
+      if (state.page) setPage(state.page);
+    } catch { /* ignore */ }
   };
 
   // ── Recording / playback state ────────────────────────────────────
@@ -830,40 +895,6 @@ export default function GraphingCalculatorSynthApp() {
     setDrumsPlaying(true);
   }, [drumsPlaying, setupAudio]);
 
-  // ── Combined Drum Presets ─────────────────────────────────────────
-  const [combinedDrumPresets, setCombinedDrumPresets] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("wavecraft_combined_drum_presets") || "[]"); } catch { return []; }
-  });
-  const [newCombinedDrumName, setNewCombinedDrumName] = useState("");
-
-  const saveCombinedDrumPreset = () => {
-    const name = newCombinedDrumName.trim();
-    if (!name) return;
-    const preset = {
-      name, bpm: drumBpm,
-      vlTone: drumMachineRef.current?.getState() ?? null,
-      po32: po32Ref.current?.getState() ?? null,
-    };
-    const existing = combinedDrumPresets.findIndex(p => p.name === name);
-    const next = [...combinedDrumPresets];
-    if (existing >= 0) next[existing] = preset; else next.push(preset);
-    setCombinedDrumPresets(next);
-    localStorage.setItem("wavecraft_combined_drum_presets", JSON.stringify(next));
-    setNewCombinedDrumName("");
-  };
-
-  const loadCombinedDrumPreset = (p) => {
-    if (p.bpm != null) setDrumBpm(p.bpm);
-    if (p.vlTone && drumMachineRef.current) drumMachineRef.current.loadState(p.vlTone);
-    if (p.po32 && po32Ref.current) po32Ref.current.loadState(p.po32);
-  };
-
-  const deleteCombinedDrumPreset = (name) => {
-    const next = combinedDrumPresets.filter(p => p.name !== name);
-    setCombinedDrumPresets(next);
-    localStorage.setItem("wavecraft_combined_drum_presets", JSON.stringify(next));
-  };
-
   // ── Button styles ─────────────────────────────────────────────────
   const btnPrimary = {
     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
@@ -1140,7 +1171,7 @@ export default function GraphingCalculatorSynthApp() {
             <h3 style={{ color: T.amber, fontSize: 14, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", margin: "0 0 8px", borderBottom: `1px solid ${T.border}`, paddingBottom: 6 }}>Presets</h3>
             <div style={{ color: T.textDim, margin: "0 0 8px" }}>
               <div style={{ marginBottom: 4 }}>Built-in factory presets are available from the preset dropdown. Select one to instantly load its equation, ADSR, effects, and slider values.</div>
-              <div style={{ marginBottom: 4 }}>Save your own presets locally, or log in to sync them to the cloud.</div>
+              <div style={{ marginBottom: 4 }}>Sign in to save your own presets. Your settings are automatically remembered across sessions.</div>
             </div>
           </div>
         </Section>
@@ -1173,7 +1204,8 @@ export default function GraphingCalculatorSynthApp() {
           onToggleSync={toggleDrumSync}
         />
 
-        {/* ── Combined Drum Kit Presets ────────────────────────── */}
+        {/* ── Drum Kit Presets (cloud, logged in only) ─────────── */}
+        {authUser && (
         <div style={{ maxWidth: 960, margin: "0 auto", padding: "0 20px 40px" }}>
           <Section title="Drum Kit Presets" icon="💾">
             <div style={{ fontSize: 10, color: T.textDim, marginBottom: 8, fontFamily: T.font }}>
@@ -1181,9 +1213,9 @@ export default function GraphingCalculatorSynthApp() {
             </div>
             <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
               <input
-                value={newCombinedDrumName}
-                onChange={(e) => setNewCombinedDrumName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && saveCombinedDrumPreset()}
+                value={newDrumPresetName}
+                onChange={(e) => setNewDrumPresetName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveDrumPreset()}
                 placeholder="Kit preset name…"
                 style={{
                   flex: 1, height: 36, fontSize: 13, padding: "0 10px",
@@ -1192,28 +1224,30 @@ export default function GraphingCalculatorSynthApp() {
                   outline: "none", minWidth: 0, fontFamily: T.font,
                 }}
               />
-              <button onClick={saveCombinedDrumPreset} disabled={!newCombinedDrumName.trim()} style={{
+              <button onClick={saveDrumPreset} disabled={!newDrumPresetName.trim()} style={{
                 ...btnPrimary, height: 34, padding: "0 14px", fontSize: 10,
-                opacity: newCombinedDrumName.trim() ? 1 : 0.4,
-                cursor: newCombinedDrumName.trim() ? "pointer" : "not-allowed",
+                opacity: newDrumPresetName.trim() ? 1 : 0.4,
+                cursor: newDrumPresetName.trim() ? "pointer" : "not-allowed",
               }}>
                 Save Kit
               </button>
             </div>
-            {combinedDrumPresets.length === 0 ? (
+            {presetsLoading ? (
+              <div style={{ fontSize: 11, color: T.textMuted, textAlign: "center", padding: "8px 0", fontFamily: T.monoFont }}>Loading…</div>
+            ) : drumPresets.length === 0 ? (
               <div style={{ fontSize: 12, color: T.textMuted, textAlign: "center", padding: "8px 0" }}>
                 No saved drum kit presets yet
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                {combinedDrumPresets.map((p) => (
-                  <div key={p.name} style={{
+                {drumPresets.map((p) => (
+                  <div key={p.id} style={{
                     display: "flex", alignItems: "center", gap: 6,
                     padding: "5px 10px", borderRadius: 2,
                     border: `1px solid ${T.border}`,
                     background: "linear-gradient(180deg, #2e2820, #1a1510)",
                   }}>
-                    <button onClick={() => loadCombinedDrumPreset(p)} style={{
+                    <button onClick={() => loadPreset(p.id)} style={{
                       flex: 1, background: "none", border: "none",
                       color: T.text, fontSize: 10, fontWeight: 700,
                       cursor: "pointer", textAlign: "left", padding: 0,
@@ -1221,8 +1255,7 @@ export default function GraphingCalculatorSynthApp() {
                     }}>
                       {p.name}
                     </button>
-                    <span style={{ fontSize: 9, color: T.textMuted, fontFamily: T.font }}>{p.bpm}bpm</span>
-                    <button onClick={() => deleteCombinedDrumPreset(p.name)} title="Delete" style={{
+                    <button onClick={() => deletePreset(p.id)} title="Delete" style={{
                       background: "none", border: "none", cursor: "pointer",
                       color: T.textMuted, fontSize: 14, padding: "0 2px", lineHeight: 1,
                     }}>✕</button>
@@ -1232,6 +1265,7 @@ export default function GraphingCalculatorSynthApp() {
             )}
           </Section>
         </div>
+        )}
       </div>
 
       {/* ── Draw module (always mounted) ──────────────────────── */}
@@ -1317,12 +1351,13 @@ export default function GraphingCalculatorSynthApp() {
               </div>
             </Section>
 
+            {authUser ? (
             <Section title="My Presets" icon="💾" style={{ marginTop: 12 }}>
               <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
                 <input
                   value={newPresetName}
                   onChange={(e) => setNewPresetName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && saveUserPreset()}
+                  onKeyDown={(e) => { if (e.key === "Enter" && newPresetName.trim()) { savePreset(newPresetName.trim()).then(ok => { if (ok) setNewPresetName(""); }); } }}
                   placeholder="Preset name…"
                   style={{
                     flex: 1, height: 36, fontSize: 13, padding: "0 10px",
@@ -1331,30 +1366,32 @@ export default function GraphingCalculatorSynthApp() {
                     outline: "none", minWidth: 0,
                   }}
                 />
-                <button onClick={() => { saveUserPreset(); if (authToken && newPresetName.trim()) saveCloudPreset(newPresetName.trim()); }} disabled={!newPresetName.trim()} style={{
+                <button onClick={() => { savePreset(newPresetName.trim()).then(ok => { if (ok) setNewPresetName(""); }); }} disabled={!newPresetName.trim()} style={{
                   ...btnPrimary, height: 34, padding: "0 14px", fontSize: 10,
                   opacity: newPresetName.trim() ? 1 : 0.4,
                   cursor: newPresetName.trim() ? "pointer" : "not-allowed",
                 }}>Save</button>
               </div>
-              {userPresets.length === 0 ? (
+              {presetsLoading ? (
+                <div style={{ fontSize: 11, color: T.textMuted, textAlign: "center", padding: "8px 0", fontFamily: T.monoFont }}>Loading…</div>
+              ) : presets.length === 0 ? (
                 <div style={{ fontSize: 12, color: T.textMuted, textAlign: "center", padding: "8px 0" }}>No saved presets yet</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                  {userPresets.map((p) => (
-                    <div key={p.name} style={{
+                  {presets.map((p) => (
+                    <div key={p.id} style={{
                       display: "flex", alignItems: "center", gap: 6,
                       padding: "5px 10px", borderRadius: 2,
                       border: `1px solid ${T.border}`,
                       background: "linear-gradient(180deg, #2e2820, #1a1510)",
                     }}>
-                      <button onClick={() => loadUserPreset(p)} style={{
+                      <button onClick={() => loadPreset(p.id)} style={{
                         flex: 1, background: "none", border: "none",
                         color: T.text, fontSize: 10, fontWeight: 700,
                         cursor: "pointer", textAlign: "left", padding: 0,
                         fontFamily: T.font, letterSpacing: 0.8, textTransform: "uppercase",
                       }}>{p.name}</button>
-                      <button onClick={() => deleteUserPreset(p.name)} title="Delete" style={{
+                      <button onClick={() => deletePreset(p.id)} title="Delete" style={{
                         background: "none", border: "none", cursor: "pointer",
                         color: T.textMuted, fontSize: 14, padding: "0 2px", lineHeight: 1,
                       }}>✕</button>
@@ -1363,39 +1400,12 @@ export default function GraphingCalculatorSynthApp() {
                 </div>
               )}
             </Section>
-
-            {authUser && (
-              <Section title="Cloud Presets" icon="☁️" style={{ marginTop: 12 }}>
-                {cloudLoading ? (
-                  <div style={{ fontSize: 11, color: T.textMuted, textAlign: "center", padding: "8px 0", fontFamily: T.monoFont }}>Loading…</div>
-                ) : cloudPresets.length === 0 ? (
-                  <div style={{ fontSize: 11, color: T.textMuted, textAlign: "center", padding: "8px 0" }}>
-                    No cloud presets — save one above while signed in
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                    {cloudPresets.map((p) => (
-                      <div key={p.id} style={{
-                        display: "flex", alignItems: "center", gap: 6,
-                        padding: "5px 10px", borderRadius: 2,
-                        border: `1px solid ${T.border}`,
-                        background: "linear-gradient(180deg, #1a2218, #101a10)",
-                      }}>
-                        <button onClick={() => loadCloudPreset(p.id)} style={{
-                          flex: 1, background: "none", border: "none",
-                          color: T.green, fontSize: 10, fontWeight: 700,
-                          cursor: "pointer", textAlign: "left", padding: 0,
-                          fontFamily: T.monoFont, letterSpacing: 0.8, textTransform: "uppercase",
-                        }}>☁ {p.name}</button>
-                        <button onClick={() => deleteCloudPreset(p.id)} title="Delete" style={{
-                          background: "none", border: "none", cursor: "pointer",
-                          color: T.textMuted, fontSize: 14, padding: "0 2px", lineHeight: 1,
-                        }}>✕</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Section>
+            ) : (
+              <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 4, border: `1px dashed ${T.border}`, textAlign: "center" }}>
+                <span style={{ fontSize: 10, color: T.textMuted }}>
+                  <span onClick={() => { setAuthModal("login"); setAuthError(""); }} style={{ color: T.amber, cursor: "pointer", textDecoration: "underline" }}>Sign in</span> to save and load presets
+                </span>
+              </div>
             )}
           </div>
 

@@ -172,41 +172,7 @@ const DrumMachine = React.forwardRef(function DrumMachine({ audioCtxRef, gainRef
     }));
   };
 
-  // ── Drum User Presets (localStorage) ──────────────────────────
-  const [drumPresets, setDrumPresets] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("wavecraft_drum_presets") || "[]"); } catch { return []; }
-  });
-  const [newDrumPresetName, setNewDrumPresetName] = useState("");
-
-  const saveDrumPreset = () => {
-    const name = newDrumPresetName.trim();
-    if (!name) return;
-    const preset = {
-      name,
-      steps: { po: [...steps.po], pi: [...steps.pi], sha: [...steps.sha] },
-      tempo,
-      drumParams: JSON.parse(JSON.stringify(drumParams)),
-    };
-    const existing = drumPresets.findIndex((p) => p.name === name);
-    const next = [...drumPresets];
-    if (existing >= 0) next[existing] = preset; else next.push(preset);
-    setDrumPresets(next);
-    localStorage.setItem("wavecraft_drum_presets", JSON.stringify(next));
-    setNewDrumPresetName("");
-  };
-
-  const loadDrumPreset = (p) => {
-    setSteps({ po: [...p.steps.po], pi: [...p.steps.pi], sha: [...p.steps.sha] });
-    setTempo(p.tempo);
-    if (p.drumParams) setDrumParams(JSON.parse(JSON.stringify(p.drumParams)));
-  };
-
-  const deleteDrumPreset = (name) => {
-    const next = drumPresets.filter((p) => p.name !== name);
-    setDrumPresets(next);
-    localStorage.setItem("wavecraft_drum_presets", JSON.stringify(next));
-  };
-
+  // ── Button styles (used by transport/UI) ──────────────────────
   const btnPrimary = {
     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
     height: 38, padding: "0 18px", borderRadius: 3,
@@ -457,61 +423,6 @@ const DrumMachine = React.forwardRef(function DrumMachine({ audioCtxRef, gainRef
           })}
         </Section>
       </div>
-
-      {/* My Drum Presets */}
-      <Section title="My Drum Presets" icon="💾" style={{ marginTop: 12 }}>
-        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-          <input
-            value={newDrumPresetName}
-            onChange={(e) => setNewDrumPresetName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && saveDrumPreset()}
-            placeholder="Pattern name…"
-            style={{
-              flex: 1, height: 36, fontSize: 13, padding: "0 10px",
-              background: T.surface, color: T.white,
-              border: `1px solid ${T.border}`, borderRadius: 8,
-              outline: "none", minWidth: 0, fontFamily: T.font,
-            }}
-          />
-          <button onClick={saveDrumPreset} disabled={!newDrumPresetName.trim()} style={{
-            ...btnPrimary, height: 34, padding: "0 14px", fontSize: 10,
-            opacity: newDrumPresetName.trim() ? 1 : 0.4,
-            cursor: newDrumPresetName.trim() ? "pointer" : "not-allowed",
-          }}>
-            Save
-          </button>
-        </div>
-        {drumPresets.length === 0 ? (
-          <div style={{ fontSize: 12, color: T.textMuted, textAlign: "center", padding: "8px 0" }}>
-            No saved drum presets yet
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            {drumPresets.map((p) => (
-              <div key={p.name} style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "5px 10px", borderRadius: 2,
-                border: `1px solid ${T.border}`,
-                background: "linear-gradient(180deg, #2e2820, #1a1510)",
-              }}>
-                <button onClick={() => loadDrumPreset(p)} style={{
-                  flex: 1, background: "none", border: "none",
-                  color: T.text, fontSize: 10, fontWeight: 700,
-                  cursor: "pointer", textAlign: "left", padding: 0,
-                  fontFamily: T.font, letterSpacing: 0.8, textTransform: "uppercase",
-                }}>
-                  {p.name}
-                </button>
-                <span style={{ fontSize: 9, color: T.textMuted, fontFamily: T.font }}>{p.tempo}bpm</span>
-                <button onClick={() => deleteDrumPreset(p.name)} title="Delete" style={{
-                  background: "none", border: "none", cursor: "pointer",
-                  color: T.textMuted, fontSize: 14, padding: "0 2px", lineHeight: 1,
-                }}>✕</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
 
       <Section title="About" icon="📖" style={{ marginTop: 12 }}>
         <div style={{ fontSize: 10, lineHeight: 2, color: T.textDim, fontFamily: T.font }}>
