@@ -358,6 +358,14 @@ export default function GraphingCalculatorSynthApp() {
     refreshActiveNotes();
   };
 
+  // Keep stable refs so the MIDI handler (mounted once) always calls the latest versions
+  const setupAudioRef = useRef(setupAudio);
+  setupAudioRef.current = setupAudio;
+  const noteOnRef = useRef(noteOn);
+  noteOnRef.current = noteOn;
+  const noteOffRef = useRef(noteOff);
+  noteOffRef.current = noteOff;
+
   useEffect(() => { if (gainRef.current) gainRef.current.gain.value = masterVolume; }, [masterVolume]);
 
   useEffect(() => {
@@ -487,14 +495,14 @@ export default function GraphingCalculatorSynthApp() {
               const [st, d1, d2] = msg.data;
               const cmd = st & 0xf0;
               if (cmd === 0x90 && d2 > 0) {
-                if (!audioCtxRef.current) await setupAudio();
+                if (!audioCtxRef.current) await setupAudioRef.current();
                 recNoteOn(d1);
-                noteOn(d1, d2 / 127);
+                noteOnRef.current(d1, d2 / 127);
                 realNotesRef.current.add(d1);
                 updateSeventh();
               } else if (cmd === 0x80 || (cmd === 0x90 && d2 === 0)) {
                 recNoteOff(d1);
-                noteOff(d1);
+                noteOffRef.current(d1);
                 realNotesRef.current.delete(d1);
                 updateSeventh();
               }
@@ -922,7 +930,7 @@ export default function GraphingCalculatorSynthApp() {
           <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase", color: T.amber }}>EquationSynth</span>
           <span style={{ fontSize: 10, color: T.textMuted, fontWeight: 500, marginLeft: 4, letterSpacing: 2 }}>v0.1</span>
           <div style={{ display: "flex", marginLeft: 16, gap: 4 }}>
-            {[{ id: "synth", label: "SYNTH" }, { id: "draw", label: "DRAW" }, { id: "drums", label: "DRUMS" }].map((tab) => (
+            {[{ id: "synth", label: "SYNTH" }, { id: "draw", label: "DRAW" }, { id: "drums", label: "DRUMS" }, { id: "guide", label: "GUIDE" }].map((tab) => (
               <button key={tab.id} onClick={() => { setPage(tab.id); window.scrollTo(0,0); }} style={{
                 height: 28, padding: "0 14px", fontSize: 11, fontWeight: 700,
                 fontFamily: T.font, letterSpacing: 1.5, textTransform: "uppercase",
@@ -966,6 +974,106 @@ export default function GraphingCalculatorSynthApp() {
             }}>Sign In</button>
           )}
         </div>
+      </div>
+
+      {/* ── User Guide ─────────────────────────────────────── */}
+      <div id="section-guide" className="hardware-module" style={{ display: page === "guide" ? "block" : "none", maxWidth: 960, margin: "0 auto", padding: "20px 20px 60px" }}>
+        <Section title="User Guide" icon="📖">
+          <div style={{ fontSize: 12, lineHeight: 1.9, color: T.text, fontFamily: T.font }}>
+
+            {/* Getting Started */}
+            <h3 style={{ color: T.amber, fontSize: 14, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", margin: "0 0 8px", borderBottom: `1px solid ${T.border}`, paddingBottom: 6 }}>Getting Started</h3>
+            <p style={{ color: T.textDim, margin: "0 0 6px" }}>
+              Click any key on the piano keyboard or press a key on your computer keyboard (A-L row = white keys, W-E-T-Y-U row = black keys) to hear sound.
+              If no sound plays, click anywhere on the page first — browsers require a user gesture to start audio.
+            </p>
+            <p style={{ color: T.textDim, margin: "0 0 16px" }}>
+              Connect a MIDI controller and it will be detected automatically. Velocity, pitch bend, and mod wheel are supported.
+            </p>
+
+            {/* Equation System */}
+            <h3 style={{ color: T.amber, fontSize: 14, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", margin: "0 0 8px", borderBottom: `1px solid ${T.border}`, paddingBottom: 6 }}>Equation System</h3>
+            <p style={{ color: T.textDim, margin: "0 0 8px" }}>
+              Type any math expression into the equation bar to define your waveform. The expression is evaluated per-sample in a high-performance AudioWorklet.
+            </p>
+            <div style={{ margin: "0 0 12px", padding: 12, borderRadius: 3, background: "#0a0f0a", border: `1px solid ${T.border}`, fontFamily: "'Share Tech Mono', 'Courier New', monospace" }}>
+              <div style={{ fontSize: 10, color: T.textMuted, fontWeight: 700, marginBottom: 6, fontFamily: T.font, textTransform: "uppercase", letterSpacing: 1.5 }}>Available Variables</div>
+              <div style={{ fontSize: 11, lineHeight: 2.2, color: T.textDim }}>
+                <div><b style={{ color: T.amber }}>x</b> — waveform phase (0 → 2π per cycle)</div>
+                <div><b style={{ color: T.amber }}>t</b> — time in seconds since note started</div>
+                <div><b style={{ color: T.amber }}>freq</b> — note frequency in Hz</div>
+                <div><b style={{ color: T.amber }}>note</b> — MIDI note number (0–127)</div>
+                <div><b style={{ color: T.amber }}>velocity</b> — key velocity (0–1)</div>
+                <div><b style={{ color: T.amber }}>a, b, c, d</b> — slider parameters (adjust with the four knobs)</div>
+              </div>
+            </div>
+            <div style={{ margin: "0 0 16px", padding: 12, borderRadius: 3, background: "#0a0f0a", border: `1px solid ${T.border}`, fontFamily: "'Share Tech Mono', 'Courier New', monospace" }}>
+              <div style={{ fontSize: 10, color: T.textMuted, fontWeight: 700, marginBottom: 6, fontFamily: T.font, textTransform: "uppercase", letterSpacing: 1.5 }}>Example Equations</div>
+              <div style={{ fontSize: 11, lineHeight: 2, color: T.green, textShadow: "0 0 6px rgba(51,255,102,0.3)" }}>
+                <div>sin(x) <span style={{ color: T.textMuted, fontSize: 9 }}>— pure sine wave</span></div>
+                <div>sin(a*x) + 0.2*sin(3*x) <span style={{ color: T.textMuted, fontSize: 9 }}>— harmonic mix with slider control</span></div>
+                <div>tanh(sin(x) + b*sin(2*x)) <span style={{ color: T.textMuted, fontSize: 9 }}>— soft-clipped harmonics</span></div>
+                <div>sin(x) * exp(-0.001*t) <span style={{ color: T.textMuted, fontSize: 9 }}>— decaying sine</span></div>
+                <div>(x / pi - 1) <span style={{ color: T.textMuted, fontSize: 9 }}>— sawtooth wave</span></div>
+                <div>sign(sin(x)) <span style={{ color: T.textMuted, fontSize: 9 }}>— square wave</span></div>
+                <div>sin(x) * sin(a * t) <span style={{ color: T.textMuted, fontSize: 9 }}>— tremolo effect</span></div>
+                <div>sin(x + b * sin(c * x)) <span style={{ color: T.textMuted, fontSize: 9 }}>— FM synthesis</span></div>
+              </div>
+            </div>
+
+            {/* Synth Controls */}
+            <h3 style={{ color: T.amber, fontSize: 14, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", margin: "0 0 8px", borderBottom: `1px solid ${T.border}`, paddingBottom: 6 }}>Synth Controls</h3>
+            <div style={{ color: T.textDim, margin: "0 0 16px" }}>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>ADSR Envelope</b> — shapes how each note's volume evolves: Attack (fade in), Decay (drop to sustain), Sustain (hold level), Release (fade out after key up).</div>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>A / B / C / D Sliders</b> — parameter knobs mapped to variables in your equation. Twist them to morph the waveform in real time.</div>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>Gain</b> — master output volume. Watch the level meter to avoid clipping.</div>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>Scale</b> — constrains the keyboard to a musical scale (chromatic, major, minor, pentatonic, blues, etc.).</div>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>Root Note</b> — sets the tonal center for the selected scale.</div>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>Octave</b> — shifts the keyboard range up or down.</div>
+            </div>
+
+            {/* Effects */}
+            <h3 style={{ color: T.amber, fontSize: 14, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", margin: "0 0 8px", borderBottom: `1px solid ${T.border}`, paddingBottom: 6 }}>Effects Chain</h3>
+            <div style={{ color: T.textDim, margin: "0 0 16px" }}>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>Filter</b> — lowpass, highpass, bandpass, or notch filter with cutoff frequency and resonance controls.</div>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>Reverb</b> — adds space and ambience. Adjust the decay time to go from tight room to vast cathedral.</div>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>Delay</b> — echo effect with time and feedback controls.</div>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>Chorus</b> — thickens the sound by layering detuned copies.</div>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>Distortion</b> — waveshaping distortion from subtle warmth to heavy crunch.</div>
+            </div>
+
+            {/* LFO */}
+            <h3 style={{ color: T.amber, fontSize: 14, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", margin: "0 0 8px", borderBottom: `1px solid ${T.border}`, paddingBottom: 6 }}>LFO Modulation</h3>
+            <div style={{ color: T.textDim, margin: "0 0 16px" }}>
+              <div style={{ marginBottom: 4 }}>Three independent LFOs can modulate parameters like filter cutoff, resonance, gain, and the A/B/C/D sliders.</div>
+              <div style={{ marginBottom: 4 }}>Each LFO has rate, depth, and shape (sine, triangle, square, saw, random) controls.</div>
+              <div style={{ marginBottom: 4 }}>Use LFOs to create movement — wobble bass, filter sweeps, tremolo, and evolving textures.</div>
+            </div>
+
+            {/* Pages */}
+            <h3 style={{ color: T.amber, fontSize: 14, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", margin: "0 0 8px", borderBottom: `1px solid ${T.border}`, paddingBottom: 6 }}>Pages</h3>
+            <div style={{ color: T.textDim, margin: "0 0 16px" }}>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>SYNTH</b> — the main equation synthesizer with keyboard, effects, visualizations, and presets.</div>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>DRAW</b> — draw a custom waveform by hand and send it to the synth engine.</div>
+              <div style={{ marginBottom: 4 }}><b style={{ color: T.text }}>DRUMS</b> — two drum machines (VL-Tone and PO-32 Tonic style) with pattern sequencing and kit presets.</div>
+            </div>
+
+            {/* Keyboard Shortcuts */}
+            <h3 style={{ color: T.amber, fontSize: 14, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", margin: "0 0 8px", borderBottom: `1px solid ${T.border}`, paddingBottom: 6 }}>Keyboard Shortcuts</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 16px", fontSize: 11, margin: "0 0 16px" }}>
+              <span style={{ color: T.amber, fontFamily: "'Share Tech Mono', monospace" }}>A S D F G H J K L</span><span style={{ color: T.textDim }}>White keys (bottom row)</span>
+              <span style={{ color: T.amber, fontFamily: "'Share Tech Mono', monospace" }}>W E T Y U O P</span><span style={{ color: T.textDim }}>Black keys (top row)</span>
+              <span style={{ color: T.amber, fontFamily: "'Share Tech Mono', monospace" }}>Z / X</span><span style={{ color: T.textDim }}>Octave down / up</span>
+            </div>
+
+            {/* Presets & Cloud */}
+            <h3 style={{ color: T.amber, fontSize: 14, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", margin: "0 0 8px", borderBottom: `1px solid ${T.border}`, paddingBottom: 6 }}>Presets</h3>
+            <div style={{ color: T.textDim, margin: "0 0 8px" }}>
+              <div style={{ marginBottom: 4 }}>Built-in factory presets are available from the preset dropdown. Select one to instantly load its equation, ADSR, effects, and slider values.</div>
+              <div style={{ marginBottom: 4 }}>Save your own presets locally, or log in to sync them to the cloud.</div>
+            </div>
+          </div>
+        </Section>
       </div>
 
       {/* ── Drum machines (always mounted) ────────────────────── */}
@@ -1569,29 +1677,6 @@ export default function GraphingCalculatorSynthApp() {
               <div style={{ display: "flex", justifyContent: "center", gap: 18, flexWrap: "wrap" }}>
                 <RotaryKnob label="Cutoff" value={filter.cutoff} onChange={(value) => setFilter((prev) => ({ ...prev, cutoff: value }))} min={60} max={20000} step={1} defaultValue={18000} lfoMod={lfoDisplay.cutoff} />
                 <RotaryKnob label="Reso" value={filter.resonance} onChange={(value) => setFilter((prev) => ({ ...prev, resonance: value }))} min={0.1} max={20} step={0.1} defaultValue={0.7} lfoMod={lfoDisplay.resonance} />
-              </div>
-            </Section>
-
-            <Section title="Quick Reference" icon="📖">
-              <div style={{ fontSize: 10, lineHeight: 2, color: T.textDim, fontFamily: T.font }}>
-                <div><b style={{ color: T.amber }}>x</b> — waveform phase input</div>
-                <div><b style={{ color: T.amber }}>t</b> — time in seconds</div>
-                <div><b style={{ color: T.amber }}>freq</b> — note frequency (Hz)</div>
-                <div><b style={{ color: T.amber }}>note</b> — MIDI note number</div>
-                <div><b style={{ color: T.amber }}>velocity</b> — key velocity (0–1)</div>
-                <div><b style={{ color: T.amber }}>a b c d</b> — slider parameters</div>
-              </div>
-              <div style={{
-                marginTop: 12, padding: 10, borderRadius: 3,
-                background: "#0a0f0a", border: `1px solid ${T.border}`,
-                fontSize: 12, color: T.textDim, lineHeight: 1.8,
-                fontFamily: "'Share Tech Mono', 'Courier New', monospace",
-              }}>
-                <div style={{ color: T.textMuted, fontSize: 9, fontWeight: 700, marginBottom: 4, fontFamily: T.font, textTransform: "uppercase", letterSpacing: 1.5 }}>Try these</div>
-                <div style={{ color: T.green, textShadow: "0 0 6px rgba(51,255,102,0.3)" }}>sin(x)</div>
-                <div style={{ color: T.green, textShadow: "0 0 6px rgba(51,255,102,0.3)" }}>sin(a*x) + 0.2*sin(3*x)</div>
-                <div style={{ color: T.green, textShadow: "0 0 6px rgba(51,255,102,0.3)" }}>tanh(sin(x) + b*sin(2*x))</div>
-                <div style={{ color: T.green, textShadow: "0 0 6px rgba(51,255,102,0.3)" }}>sin(x) * exp(-0.001*t)</div>
               </div>
             </Section>
 
