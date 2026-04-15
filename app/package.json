@@ -7,14 +7,13 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "deploy": "vite build && npx gh-pages -d dist --no-history"
+    "deploy": "vite build"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
     "@types/node": "^25.6.0",
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.27",
-    "gh-pages": "^6.3.0",
     "postcss": "^8.5.9",
     "tailwindcss": "^4.2.2",
     "typescript": "~6.0.2",
